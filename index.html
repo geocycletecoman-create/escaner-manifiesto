@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escáner de Documentos - Clasificador</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="bi bi-document-scanner"></i> Clasificador de Documentos</h1>
+            <p class="subtitle">Escanea documentos y detecta automáticamente si son aceptables</p>
+        </header>
+
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="bi bi-camera"></i> Paso 1: Capturar Documento</h3>
+            </div>
+            <div class="card-body">
+                <div class="upload-options">
+                    <button id="cameraBtn" class="btn btn-primary">
+                        <i class="bi bi-camera"></i> Usar Cámara
+                    </button>
+                    <button id="uploadBtn" class="btn btn-secondary">
+                        <i class="bi bi-upload"></i> Subir Imagen
+                    </button>
+                    <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+                </div>
+
+                <div class="preview-container">
+                    <div id="imagePreview" class="image-preview">
+                        <p>No hay imagen seleccionada</p>
+                    </div>
+                    <div id="cameraView" class="camera-view" style="display: none;">
+                        <video id="cameraStream" autoplay playsinline></video>
+                        <button id="captureBtn" class="btn btn-success">
+                            <i class="bi bi-camera-fill"></i> Capturar
+                        </button>
+                        <button id="cancelCameraBtn" class="btn btn-danger">
+                            <i class="bi bi-x-circle"></i> Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="bi bi-gear"></i> Paso 2: Configurar Palabras Clave</h3>
+            </div>
+            <div class="card-body">
+                <div class="config-section">
+                    <div class="config-group">
+                        <label for="rejectedWords"><i class="bi bi-x-circle-fill text-danger"></i> Términos NO Aceptables</label>
+                        <textarea id="rejectedWords" rows="3" placeholder="Escribe cada término en una nueva línea (ej: prohibido, rechazado, no autorizado)">prohibido
+rechazado
+no autorizado
+contrabando
+ilegal</textarea>
+                        <small class="text-muted">El documento será RECHAZADO si contiene alguno de estos términos</small>
+                    </div>
+                    
+                    <div class="config-group">
+                        <label for="requiredWords"><i class="bi bi-check-circle-fill text-success"></i> Términos Requeridos (opcional)</label>
+                        <textarea id="requiredWords" rows="3" placeholder="Escribe cada término en una nueva línea (ej: certificado, aprobado, válido)"></textarea>
+                        <small class="text-muted">El documento será ACEPTADO solo si contiene AL MENOS UNO de estos términos (deja vacío para ignorar)</small>
+                    </div>
+
+                    <div class="config-checkbox">
+                        <input type="checkbox" id="caseSensitive" checked>
+                        <label for="caseSensitive">Diferencia entre MAYÚSCULAS y minúsculas</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="bi bi-play-circle"></i> Paso 3: Procesar Documento</h3>
+            </div>
+            <div class="card-body">
+                <button id="processBtn" class="btn btn-process" disabled>
+                    <i class="bi bi-magic"></i> Analizar Documento
+                </button>
+                
+                <div id="loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Procesando imagen con OCR...</p>
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar"></div>
+                    </div>
+                    <p id="progressText">Iniciando...</p>
+                </div>
+
+                <div id="results" class="results" style="display: none;">
+                    <div id="resultStatus" class="result-status">
+                        <!-- Resultado dinámico -->
+                    </div>
+                    
+                    <div class="result-details">
+                        <h4><i class="bi bi-text-left"></i> Texto Detectado:</h4>
+                        <div id="detectedText" class="detected-text"></div>
+                        
+                        <h4><i class="bi bi-search"></i> Términos Encontrados:</h4>
+                        <div id="foundTerms" class="found-terms"></div>
+                        
+                        <div class="action-buttons">
+                            <button id="downloadBtn" class="btn btn-outline">
+                                <i class="bi bi-download"></i> Descargar Resultado
+                            </button>
+                            <button id="resetBtn" class="btn btn-outline">
+                                <i class="bi bi-arrow-clockwise"></i> Nuevo Escaneo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h4><i class="bi bi-info-circle"></i> Instrucciones:</h4>
+            <ol>
+                <li>Captura o sube una imagen del documento</li>
+                <li>Configura los términos de aceptación/rechazo</li>
+                <li>Haz clic en "Analizar Documento"</li>
+                <li>Revisa el resultado y el texto extraído</li>
+            </ol>
+            <p class="note"><strong>Nota:</strong> Todo el procesamiento se hace en tu navegador. Tus documentos NO se suben a ningún servidor.</p>
+        </div>
+
+        <footer>
+            <p>Clasificador de Documentos v1.0 | 
+                <a href="#" id="installBtn" style="display: none;">
+                    <i class="bi bi-download"></i> Instalar App
+                </a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Tesseract.js desde CDN -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@v4.0.2/dist/tesseract.min.js'></script>
+    <script src="script.js"></script>
+</body>
+</html>
