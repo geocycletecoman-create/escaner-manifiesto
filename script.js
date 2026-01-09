@@ -117,7 +117,7 @@ async function handleCameraClick() {
         } else if (error.name === 'NotReadableError') {
             userMessage += 'La cámara está siendo usada por otra aplicación.';
         } else {
-            userMessage += Error técnico: ${error.message};
+            userMessage += `Error técnico: ${error.message}`;
         }
         alert(userMessage);
     }
