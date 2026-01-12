@@ -815,7 +815,7 @@ ${resultado.coincidencias.length > 0 ?
 ACCIONES RECOMENDADAS:
 ----------------------
 ${resultado.accionesRecomendadas.length > 0 ? 
-    resultado.accionesRecomendadas.map((a, i) => ${i+1}. ${a}).join('\n') : 
+    resultado.accionesRecomendadas.map((a, i) => `${i+1}. ${a}`).join('\n') : 
     'Ninguna acción requerida.'}
 
 LISTA MAESTRA CONSULTADA:
