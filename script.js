@@ -332,7 +332,7 @@ async function ejecutarOCR(imagen) {
                 if (progressBar) {
                     const baseWidth = 25; // Comienza en 25%
                     const ocrWidth = 50; // OCR usa 50% del progreso total
-                    progressBar.style.width = ${baseWidth + (progress.progress * ocrWidth)}%;
+                    progressBar.style.width = `${baseWidth + (progress.progress * ocrWidth)}%`;
                 }
                 
                 if (progressText) {
