@@ -1,3 +1,4 @@
+const LISTA_MAESTRA =[
 {
         generador: "INDUSTRIAS QUIMICAS MEXICO S.A. DE C.V.",
         residuos: ["cianuro", "ácido sulfúrico", "reactivos peligrosos", "solventes"],
