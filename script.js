@@ -711,7 +711,7 @@ function descargarReporteIncidencia() {
     const ultimaIncidencia = historialIncidencias[historialIncidencias.length - 1];
     const contenido = generarReporteIncidencia(ultimaIncidencia);
     
-    descargarArchivo(contenido, `incidencia_${ultimaIncidencia.id}.txt, 'text/plain');
+    descargarArchivo(contenido, `incidencia_${ultimaIncidencia.id}.txt`, 'text/plain');
     console.log('📥 Reporte de incidencia descargado');
 }
 
