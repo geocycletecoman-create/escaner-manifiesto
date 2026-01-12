@@ -779,7 +779,7 @@ function descargarReporteCompleto() {
     }
     
     const contenido = generarReporteCompleto(ultimoResultado);
-    descargarArchivo(contenido, reporte_manifiesto_${ultimoResultado.idAnalisis}.txt, 'text/plain');
+    descargarArchivo(contenido, `reporte_manifiesto_${ultimoResultado.idAnalisis}.txt`, 'text/plain');
     console.log('📥 Reporte completo descargado');
 }
 
