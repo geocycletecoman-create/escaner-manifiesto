@@ -335,7 +335,7 @@ async function ejecutarOCR(imagen) {
                 }
                 
                 if (progressText) {
-                    progressText.textContent = Extrayendo texto... ${percent}%;
+                    progressText.textContent = `Extrayendo texto... ${percent}%`;
                 }
             }
         }
@@ -411,7 +411,7 @@ function extraerDatosManifiesto(texto) {
 }
 
 function verificarContraListaMaestra(generador, residuo) {
-    console.log(🔎 Verificando: "${generador}" - "${residuo}");
+    console.log(`🔎 Verificando: "${generador}" - "${residuo}"`);
     
     const generadorUpper = generador.toUpperCase();
     const residuoLower = residuo.toLowerCase();
@@ -462,7 +462,7 @@ function verificarContraListaMaestra(generador, residuo) {
                         
                     } else if (item.estado === 'requiere_permiso_especial') {
                         resultado.esAceptable = false;
-                        resultado.motivo = ⚠️ REQUIERE PERMISO ESPECIAL: ${item.motivo};
+                        resultado.motivo = `⚠️ REQUIERE PERMISO ESPECIAL: ${item.motivo}`;
                         resultado.nivelRiesgo = 'medio-alto';
                         resultado.accionesRecomendadas = [
                             'Solicitar permiso especial documentado.',
@@ -473,7 +473,7 @@ function verificarContraListaMaestra(generador, residuo) {
                         
                     } else if (item.estado === 'requiere_revision') {
                         resultado.esAceptable = false;
-                        resultado.motivo = 🔍 REQUIERE REVISIÓN: ${item.motivo};
+                        resultado.motivo = `🔍 REQUIERE REVISIÓN: ${item.motivo}`;
                         resultado.nivelRiesgo = 'medio';
                         resultado.accionesRecomendadas = [
                             'Revisión manual por responsable ambiental.',
@@ -499,7 +499,7 @@ function verificarContraListaMaestra(generador, residuo) {
                 });
                 
                 resultado.esAceptable = false;
-                resultado.motivo = ⚠️ REQUIERE REVISIÓN: Residuo contiene término peligroso identificado: "${palabra}".;
+                resultado.motivo = `⚠️ REQUIERE REVISIÓN: Residuo contiene término peligroso identificado: "${palabra}".`;
                 resultado.nivelRiesgo = 'medio';
                 resultado.accionesRecomendadas = [
                     'Revisión manual por responsable ambiental.',
