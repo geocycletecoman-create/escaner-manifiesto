@@ -809,7 +809,7 @@ ${resultado.motivo}
 COINCIDENCIAS ENCONTRADAS:
 --------------------------
 ${resultado.coincidencias.length > 0 ? 
-    resultado.coincidencias.map(c => • ${c.tipo}: ${c.valor} (${c.estado})).join('\n') : 
+    resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n') : 
     'No se encontraron coincidencias en listas reguladas.'}
 
 ACCIONES RECOMENDADAS:
