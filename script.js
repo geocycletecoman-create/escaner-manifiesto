@@ -316,34 +316,78 @@ async function iniciarAnalisis() {
 // ============================================
 
 async function ejecutarOCR(imagen) {
-    console.log('🔍 Ejecutando OCR...');
+    console.log('🔄 [OCR] Iniciando proceso...');
     
-    if (!tesseractWorker) {
-        throw new Error('El trabajador de OCR no está inicializado');
-    }
-    
-    const result = await tesseractWorker.recognize(imagen, {
-        logger: (progress) => {
-            if (progress.status === 'recognizing text') {
-                const percent = Math.round(progress.progress * 100);
-                const progressBar = document.getElementById('progressBar');
-                const progressText = document.getElementById('progressText');
-                
-                if (progressBar) {
-                    const baseWidth = 25; // Comienza en 25%
-                    const ocrWidth = 50; // OCR usa 50% del progreso total
-                    progressBar.style.width = `${baseWidth + (progress.progress * ocrWidth)}%`;
-                }
-                
-                if (progressText) {
-                    progressText.textContent = `Extrayendo texto... ${percent}%`;
-                }
-            }
+    // Si la imagen es una URL blob, la convertimos a File
+    let imagenParaOCR = imagen;
+    if (typeof imagen === 'string' && imagen.startsWith('blob:')) {
+        console.log('[OCR] Convirtiendo URL blob...');
+        try {
+            const response = await fetch(imagen);
+            const blob = await response.blob();
+            imagenParaOCR = new File([blob], 'manifiesto.jpg', { type: 'image/jpeg' });
+        } catch (error) {
+            console.warn('[OCR] No se pudo convertir blob, usando objeto original:', error);
         }
-    });
-    
-    console.log('📝 Texto extraído:', result.data.text.substring(0, 200) + '...');
-    return result.data.text;
+    }
+
+    try {
+        console.log('[OCR] Creando worker...');
+        document.getElementById('progressText').textContent = 'Configurando OCR (0%)...';
+        document.getElementById('progressBar').style.width = '10%';
+        
+        // NOTA: Usamos un worker nuevo cada vez para evitar problemas
+        const worker = await Tesseract.createWorker('spa');
+        
+        // --- FUNCIÓN LOGGER SEGURA Y SIMPLE (CORREGIDA) ---
+        // Solo pasamos datos primitivos (números, strings) para evitar DataCloneError
+        const result = await worker.recognize(imagenParaOCR, {
+            logger: (m) => {
+                // Filtramos solo los datos seguros para mostrar en consola
+                console.log('[OCR Logger]', m.status, m.progress);
+                
+                // Actualizamos la UI basándonos solo en status y progress
+                if (m.status === 'loading tesseract core') {
+                    document.getElementById('progressText').textContent = 'Cargando núcleo OCR (20%)...';
+                    document.getElementById('progressBar').style.width = '20%';
+                } 
+                else if (m.status === 'loading language traineddata') {
+                    document.getElementById('progressText').textContent = 'Cargando idioma español (40%)...';
+                    document.getElementById('progressBar').style.width = '40%';
+                } 
+                else if (m.status === 'initializing api') {
+                    document.getElementById('progressText').textContent = 'Inicializando (60%)...';
+                    document.getElementById('progressBar').style.width = '60%';
+                } 
+                else if (m.status === 'recognizing text') {
+                    // 'progress' es un número entre 0 y 1, es SEGURO de usar
+                    const porcentaje = Math.round(m.progress * 100);
+                    document.getElementById('progressText').textContent = `Extrayendo texto (${porcentaje}%)...`;
+                    document.getElementById('progressBar').style.width = `${60 + (m.progress * 30)}%;` // De 60% a 90%
+                }
+                // Ignoramos cualquier otro dato complejo en 'm'
+            }
+        });
+
+        console.log('[OCR] Terminando worker...');
+        await worker.terminate();
+        
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressText').textContent = 'Texto extraído (100%)!';
+        
+        const textoExtraido = result.data.text;
+        console.log('✅ [OCR] Completado. Caracteres extraídos:', textoExtraido.length);
+        console.log('📄 Muestra (primeras líneas):', textoExtraido.split('\n').slice(0, 5).join('\n'));
+        
+        return textoExtraido;
+
+    } catch (error) {
+        console.error('❌ [OCR] Error FATAL:', error);
+        document.getElementById('progressText').textContent = `Error: ${error.message}`;
+        document.getElementById('progressBar').style.backgroundColor = '#dc2626';
+        // Lanzamos el error para que la función principal lo maneje
+        throw new Error(`Fallo en OCR: ${error.message}`);
+    }
 }
 
 function extraerDatosManifiesto(texto) {
