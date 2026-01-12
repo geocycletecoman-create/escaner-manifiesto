@@ -452,7 +452,7 @@ function verificarContraListaMaestra(generador, residuo) {
                     // DETERMINAR VEREDICTO BASADO EN EL ESTADO
                     if (item.estado === 'rechazado_automatico') {
                         resultado.esAceptable = false;
-                        resultado.motivo = ❌ RECHAZADO: ${item.motivo};
+                        resultado.motivo = `❌ RECHAZADO: ${item.motivo}`;
                         resultado.nivelRiesgo = 'alto';
                         resultado.accionesRecomendadas = [
                             'Rechazar el manifiesto automáticamente.',
