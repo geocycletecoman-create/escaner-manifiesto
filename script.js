@@ -248,69 +248,59 @@ function closeCamera() {
 // FUNCIÓN PRINCIPAL DE ANÁLISIS
 // ============================================
 
-async function iniciarAnalisis() {
-    console.log('🚀 Iniciando análisis de manifiesto...');
+async function ejecutarOCR(imagen) {
+    console.log('🔄 [OCR] Iniciando proceso SIN logger...');
     
-    if (!currentImage) {
-        alert('⚠️ Por favor, capture o suba una imagen del manifiesto primero.');
-        return;
+    // Si la imagen es una URL blob, la convertimos a File
+    let imagenParaOCR = imagen;
+    if (typeof imagen === 'string' && imagen.startsWith('blob:')) {
+        console.log('[OCR] Convirtiendo URL blob...');
+        try {
+            const response = await fetch(imagen);
+            const blob = await response.blob();
+            imagenParaOCR = new File([blob], 'manifiesto.jpg', { type: 'image/jpeg' });
+        } catch (error) {
+            console.warn('[OCR] No se pudo convertir blob:', error);
+        }
     }
-    
-    // Ocultar sección de captura, mostrar procesamiento
-    document.querySelector('.card:first-of-type').style.display = 'none';
-    document.querySelector('.processing-card').style.display = 'block';
-    document.querySelector('.results-card').style.display = 'none';
-    
-    // Actualizar texto de progreso
-    document.getElementById('progressText').textContent = 'Extrayendo texto del manifiesto...';
-    document.getElementById('progressBar').style.width = '25%';
-    
+
     try {
-        // 1. EJECUTAR OCR
-        const textoCompleto = await ejecutarOCR(currentImage);
-        document.getElementById('progressBar').style.width = '50%';
-        document.getElementById('progressText').textContent = 'Analizando datos extraídos...';
+        console.log('[OCR] Creando worker...');
+        document.getElementById('progressText').textContent = 'Configurando OCR (10%)...';
+        document.getElementById('progressBar').style.width = '10%';
         
-        // 2. EXTRAER DATOS CLAVE DEL MANIFIESTO
-        const datosExtraidos = extraerDatosManifiesto(textoCompleto);
-        document.getElementById('progressBar').style.width = '75%';
-        document.getElementById('progressText').textContent = 'Verificando contra lista maestra...';
+        // 1. CREAR WORKER SIN LOGGER
+        const worker = await Tesseract.createWorker('spa');
         
-        // 3. VERIFICAR CONTRA LISTA MAESTRA
-        const resultadoVerificacion = verificarContraListaMaestra(
-            datosExtraidos.razonSocial, 
-            datosExtraidos.descripcionResiduo
-        );
-        document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = 'Generando resultados...';
-        
-        // 4. COMBINAR RESULTADOS
-        ultimoResultado = {
-            ...datosExtraidos,
-            ...resultadoVerificacion,
-            textoOriginal: textoCompleto,
-            fechaAnalisis: new Date().toISOString(),
-            idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
-        };
-        
-        // 5. MOSTRAR RESULTADOS
+        // Simular progreso inicial
         setTimeout(() => {
-            document.querySelector('.processing-card').style.display = 'none';
-            document.querySelector('.results-card').style.display = 'block';
-            mostrarResultadosEnInterfaz(ultimoResultado);
-            console.log('✅ Análisis completado exitosamente');
+            document.getElementById('progressText').textContent = 'Cargando núcleo OCR (30%)...';
+            document.getElementById('progressBar').style.width = '30%';
         }, 500);
         
-    } catch (error) {
-        console.error('❌ Error en el análisis:', error);
-        mostrarError('Error al procesar el manifiesto: ' + error.message);
+        // 2. EJECUTAR RECONOCIMIENTO SIN FUNCIÓN LOGGER
+        const result = await worker.recognize(imagenParaOCR);
         
-        // Restaurar vista
-        document.querySelector('.processing-card').style.display = 'none';
-        document.querySelector('.card:first-of-type').style.display = 'block';
+        // 3. TERMINAR WORKER
+        await worker.terminate();
+        
+        // Actualizar progreso final
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressText').textContent = 'Texto extraído (100%)!';
+        
+        const textoExtraido = result.data.text;
+        console.log('✅ [OCR] Completado. Caracteres extraídos:', textoExtraido.length);
+        console.log('📄 Muestra (primeras líneas):', textoExtraido.split('\n').slice(0, 5).join('\n'));
+        
+        return textoExtraido;
+
+    } catch (error) {
+        console.error('❌ [OCR] Error FATAL:', error);
+        document.getElementById('progressText').textContent = `Error: ${error.message}`;
+        document.getElementById('progressBar').style.backgroundColor = '#dc2626';
+        throw new Error(`Fallo en OCR: ${error.message}`);
     }
 }
-
 // ============================================
 // FUNCIONES DE PROCESAMIENTO
 // ============================================
