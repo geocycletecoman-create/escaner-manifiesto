@@ -551,9 +551,9 @@ function mostrarResultadosEnInterfaz(resultado) {
     let detallesHTML = '';
     
     if (resultado.coincidencias.length > 0) {
-        detallesHTML += <div class="matches-found">;
-        detallesHTML += <p><strong>Coincidencias encontradas en listas reguladas:</strong></p>;
-        detallesHTML += <ul class="matches-list">;
+        detallesHTML += `<div class="matches-found">`;
+        detallesHTML += `<p><strong>Coincidencias encontradas en listas reguladas:</strong></p>`;
+        detallesHTML += `<ul class="matches-list">`;
         
         resultado.coincidencias.forEach(coinc => {
             let icono = '';
@@ -577,20 +577,20 @@ function mostrarResultadosEnInterfaz(resultado) {
             `;
         });
         
-        detallesHTML += </ul>;
+        detallesHTML += `</ul>`;
         
         if (resultado.accionesRecomendadas.length > 0) {
-            detallesHTML += <div class="recommended-actions">;
-            detallesHTML += <p><strong>Acciones recomendadas:</strong></p>;
-            detallesHTML += <ol>;
+            detallesHTML += `<div class="recommended-actions">`;
+            detallesHTML += `<p><strong>Acciones recomendadas:</strong></p>`;
+            detallesHTML += `<ol>`;
             resultado.accionesRecomendadas.forEach(accion => {
-                detallesHTML += <li>${accion}</li>;
+                detallesHTML += `<li>${accion}</li>`;
             });
-            detallesHTML += </ol>;
-            detallesHTML += </div>;
+            detallesHTML += `</ol>`;
+            detallesHTML += `</div>`;
         }
         
-        detallesHTML += </div>;
+        detallesHTML += `</div>`;
     } else {
         detallesHTML += `
             <div class="no-matches">
@@ -614,7 +614,7 @@ function mostrarResultadosEnInterfaz(resultado) {
         incidenceConfirmation.style.display = 'none';
         
         // Pre-llenar el textarea con el motivo del rechazo
-        document.getElementById('incidenceNotes').value = MOTIVO DEL RECHAZO AUTOMÁTICO:\n${resultado.motivo}\n\nDATOS DEL MANIFIESTO:\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\n\nOBSERVACIONES ADICIONALES:\n;
+        document.getElementById('incidenceNotes').value = `MOTIVO DEL RECHAZO AUTOMÁTICO:\n${resultado.motivo}\n\nDATOS DEL MANIFIESTO:\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\n\nOBSERVACIONES ADICIONALES:\n`;
         
         // Enfocar el campo de observaciones
         setTimeout(() => {
