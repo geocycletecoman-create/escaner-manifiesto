@@ -747,11 +747,11 @@ Nivel de Riesgo:     ${resultado.nivelRiesgo.toUpperCase()}
 
 COINCIDENCIAS ENCONTRADAS:
 --------------------------
-${resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})).join('\n')}
+${resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n')}
 
 ACCIONES RECOMENDADAS POR EL SISTEMA:
 --------------------------------------
-${resultado.accionesRecomendadas.map((a, i) => ${i+1}. ${a}).join('\n')}
+${resultado.accionesRecomendadas.map((a, i) => `${i+1}. ${a}`).join('\n')}
 
 OBSERVACIONES REGISTRADAS:
 --------------------------
