@@ -746,7 +746,7 @@ Nivel de Riesgo:     ${resultado.nivelRiesgo.toUpperCase()}
 
 COINCIDENCIAS ENCONTRADAS:
 --------------------------
-${resultado.coincidencias.map(c => • ${c.tipo}: ${c.valor} (${c.estado})).join('\n')}
+${resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})).join('\n')}
 
 ACCIONES RECOMENDADAS POR EL SISTEMA:
 --------------------------------------
@@ -820,7 +820,7 @@ ${resultado.accionesRecomendadas.length > 0 ?
 LISTA MAESTRA CONSULTADA:
 -------------------------
 Total de generadores configurados: ${LISTA_MAESTRA.length}
-${LISTA_MAESTRA.map(g => • ${g.generador} (${g.residuos.length} residuos)).join('\n')}
+${LISTA_MAESTRA.map(g => `• ${g.generador} (${g.residuos.length} residuos)`).join('\n')}
 
 TEXTO COMPLETO EXTRAÍDO (OCR):
 ------------------------------
@@ -898,7 +898,7 @@ function mostrarError(mensaje) {
 }
 
 function mostrarErrorSistema(mensaje) {
-    alert(❌ ERROR DEL SISTEMA:\n\n${mensaje}\n\nPor favor, recarga la página o contacta al soporte técnico.);
+    alert(`❌ ERROR DEL SISTEMA:\n\n${mensaje}\n\nPor favor, recarga la página o contacta al soporte técnico.`);
 }
 
 // ============================================
@@ -924,7 +924,7 @@ try {
     const historialGuardado = localStorage.getItem('historialIncidencias');
     if (historialGuardado) {
         historialIncidencias = JSON.parse(historialGuardado);
-        console.log(📚 Historial cargado: ${historialIncidencias.length} incidencias previas);
+        console.log(`📚 Historial cargado: ${historialIncidencias.length} incidencias previas`);
     }
 } catch (e) {
     console.warn('No se pudo cargar historial de incidencias:', e);
