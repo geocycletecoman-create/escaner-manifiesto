@@ -538,7 +538,7 @@ function mostrarResultadosEnInterfaz(resultado) {
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
     
-    resultStatus.className = result-status ${isAcceptable ? 'acceptable' : 'not-acceptable'};
+    `resultStatus.className = result-status ${isAcceptable ? 'acceptable' : 'not-acceptable'}`;
     resultStatus.innerHTML = `
         <i class="bi ${isAcceptable ? 'bi-check-circle' : 'bi-x-circle'}"></i>
         <h2>${isAcceptable ? '✅ MANIFIESTO ACEPTADO' : '❌ MANIFIESTO RECHAZADO'}</h2>
