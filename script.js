@@ -330,7 +330,7 @@ async function ejecutarOCR(imagen) {
                     'Solicitar hoja de seguridad del material.',
                     'Validar clasificación del residuo.'
                 ];
-                return resultado`;
+                return resultado;
             }
         }
     }
