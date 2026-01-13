@@ -38,10 +38,10 @@ const PALABRAS_PELIGROSAS = [
  "infectante", "biológico peligroso", "corrosivo", "inflamable", "explosivo",
     "reactivo", "tóxico", "mutagénico", "cancerígeno", "ecotóxico"
 ];
-
+/ 1. VARIABLES GLOBALES Y CONFIGURACIÓN
 // ============================================
-// VARIABLES GLOBALES
-// ============================================
+const LISTA_MAESTRA = [ /* tu lista aquí */ ];
+const PALABRAS_PELIGROSAS = [ /* tus palabras aquí */ ];
 
 let currentImage = null;
 let tesseractWorker = null;
@@ -50,37 +50,81 @@ let ultimoResultado = null;
 let historialIncidencias = [];
 
 // ============================================
-// INICIALIZACIÓN DE LA APLICACIÓN
+// 2. FUNCIONES DE CÁMERA/ARCHIVO (SE DEFINEN PRIMERO)
 // ============================================
+async function openCamera() { /* código */ }
+function handleFileSelect(event) { /* código */ }
+function mostrarImagenPrevia(imageUrl) { /* código */ }
+function captureFromCamera() { /* código */ }
+function closeCamera() { /* código */ }
 
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('✅ Sistema de Validación de Manifiestos - Inicializado');
-    console.log('📋 Lista maestra cargada:', LISTA_MAESTRA.length, 'generadores configurados');
+// ============================================
+// 3. FUNCIÓN PRINCIPAL iniciarAnalisis (¡DEFINIR ANTES DE USAR!)
+// ============================================
+async function iniciarAnalisis() {
+    console.log('🚀 Iniciando análisis de manifiesto...');
     
-    // Verificar si Tesseract está disponible
-    if (typeof Tesseract === 'undefined') {
-        console.error('❌ Tesseract.js no se cargó correctamente');
-        mostrarErrorSistema('La biblioteca de OCR no se cargó. Por favor, recarga la página.');
+    if (!currentImage) {
+        alert('⚠️ Por favor, capture o suba una imagen del manifiesto primero.');
         return;
     }
     
-    setupEventListeners();
-    inicializarTesseract();
-});
+    // ... TODO el contenido de tu función iniciarAnalisis ...
+    // (incluyendo el try-catch y llamadas a otras funciones)
+}
 
+// ============================================
+// 4. FUNCIONES DE PROCESAMIENTO
+// ============================================
+async function ejecutarOCR(imagen) {
+    console.log('🔄 [OCR] Iniciando proceso...');
+    
+    document.getElementById('progressText').textContent = 'Preparando OCR...';
+    document.getElementById('progressBar').style.width = '10%';
+    
+    try {
+        const worker = await Tesseract.createWorker('spa');
+        const result = await worker.recognize(imagen);
+        await worker.terminate();
+        
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressText').textContent = '¡Texto extraído!';
+        
+        return result.data.text;
+        
+    } catch (error) {
+        console.error('❌ [OCR] Error:', error);
+        document.getElementById('progressText').textContent = Error: ${error.message};
+        throw new Error(Fallo en OCR: ${error.message});
+    }
+}
+
+function extraerDatosManifiesto(texto) { /* código */ }
+function verificarContraListaMaestra(generador, residuo) { /* código */ }
+
+// ============================================
+// 5. FUNCIONES DE INTERFAZ
+// ============================================
+function mostrarResultadosEnInterfaz(resultado) { /* código */ }
+
+// ============================================
+// 6. INICIALIZACIÓN (setupEventListeners AL FINAL)
+// ============================================
 function setupEventListeners() {
     console.log('🔧 Configurando eventos...');
     
     // Eventos de captura de imagen
     document.getElementById('cameraBtn').addEventListener('click', openCamera);
     document.getElementById('uploadBtn').addEventListener('click', () => {
-        console.log('📤 Botón subir clickeado');
         document.getElementById('fileInput').click();
     });
     document.getElementById('fileInput').addEventListener('change', handleFileSelect);
     document.getElementById('captureBtn').addEventListener('click', captureFromCamera);
     document.getElementById('cancelCameraBtn').addEventListener('click', closeCamera);
-        
+    
+    // ✅ AHORA iniciarAnalisis YA ESTÁ DEFINIDA
+    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
+    
     // Eventos de resultados
     document.getElementById('newScanBtn').addEventListener('click', reiniciarEscaneo);
     document.getElementById('downloadReportBtn').addEventListener('click', descargarReporteCompleto);
@@ -92,18 +136,20 @@ function setupEventListeners() {
     document.getElementById('newScanAfterIncidence').addEventListener('click', reiniciarEscaneo);
 }
 
-async function inicializarTesseract() {
-    try {
-        console.log('🔄 Inicializando Tesseract.js...');
-        tesseractWorker = await Tesseract.createWorker();
-        await tesseractWorker.loadLanguage('spa');
-        await tesseractWorker.initialize('spa');
-        console.log('✅ Tesseract.js inicializado correctamente para español');
-    } catch (error) {
-        console.error('❌ Error al inicializar Tesseract:', error);
-        mostrarErrorSistema('No se pudo inicializar el sistema de OCR.');
+// ============================================
+// 7. INICIALIZAR CUANDO EL DOM ESTÉ LISTO
+// ============================================
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('✅ Sistema de Validación de Manifiestos - Inicializado');
+    
+    if (typeof Tesseract === 'undefined') {
+        console.error('❌ Tesseract.js no se cargó correctamente');
+        mostrarErrorSistema('La biblioteca de OCR no se cargó.');
+        return;
     }
-}
+    
+    setupEventListeners(); // ← Esto se ejecuta AL FINAL, cuando todo está definido
+});
 
 // ============================================
 // FUNCIONES DE CAPTURA DE IMAGEN (CÁMERA/ARCHIVO)
