@@ -26,7 +26,7 @@ const LISTA_MAESTRA =[
     {
         generador: "NISSAN MEXICANA, S.A. DE C.V.",
         residuos: ["INFLAMABLES"],
-        estado: "Rechazo_automatico",
+        estado: "Rechazado_automatico",
         motivo: "Residuos de inflamables peligrosos no autorizados"
     }
     // AÑADE MÁS GENERADORES AQUÍ SIGUIENDO EL MISMO FORMATO
@@ -80,10 +80,7 @@ function setupEventListeners() {
     document.getElementById('fileInput').addEventListener('change', handleFileSelect);
     document.getElementById('captureBtn').addEventListener('click', captureFromCamera);
     document.getElementById('cancelCameraBtn').addEventListener('click', closeCamera);
-    
-    // Evento principal de análisis
-    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
-    
+        
     // Eventos de resultados
     document.getElementById('newScanBtn').addEventListener('click', reiniciarEscaneo);
     document.getElementById('downloadReportBtn').addEventListener('click', descargarReporteCompleto);
@@ -243,7 +240,9 @@ function closeCamera() {
     document.getElementById('cameraView').style.display = 'none';
     document.getElementById('imagePreview').style.display = 'flex';
 }
-
+ // Evento principal de análisis
+    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
+    
 // ============================================
 // FUNCIÓN PRINCIPAL DE ANÁLISIS
 // ============================================
