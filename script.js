@@ -1,9 +1,9 @@
 const LISTA_MAESTRA = [
-    {
-        generador: "INDUSTRIAS QUIMICAS MEXICO S.A. DE C.V.",
-        residuos: ["cianuro", "ácido sulfúrico", "reactivos peligrosos", "solventes"],
-        estado: "rechazado_automatico",
-        motivo: "Generador no autorizado para manejo de químicos peligrosos"
+  {
+        generador: "SYNTHON MEXICO SA DE CV",
+        residuos: ["MEDICAMENTO CADUCO Y OBSOLETO Y EMPAQUE PRIMARIO"],
+        estado: "requiere_permiso_especial",
+        motivo: "Ingreso aceptable"
     },
     {
         generador: "RELLENO VILLA DE ALVAREZ",
@@ -14,8 +14,8 @@ const LISTA_MAESTRA = [
     {
         generador: "LABORATORIOS PISA S.A. DE C.V. (TLAJOMULCO)",
         residuos: ["BASURA INDUSTRIAL CONTAMINADA"],
-        estado: "rechazado_automatico",
-        motivo: "Residuos peligrosos no autorizados"
+        estado: "requiere_permiso_especial",
+        motivo: "Ingreso aceptable"
     },
     {
         generador: "NISSAN MEXICANA, S.A. DE C.V.",
@@ -26,7 +26,7 @@ const LISTA_MAESTRA = [
     {
         generador: "NISSAN MEXICANA, S.A. DE C.V.",
         residuos: ["INFLAMABLES"],
-        estado: "rechazado_automatico", // CORREGIDO: era "Rechazo_automatico"
+        estado: "rechazado_automatico",
         motivo: "Residuos de inflamables peligrosos no autorizados"
     }
 ];
