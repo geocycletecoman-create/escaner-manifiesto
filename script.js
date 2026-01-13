@@ -1,5 +1,5 @@
-const LISTA_MAESTRA =[
-{
+const LISTA_MAESTRA = [
+    {
         generador: "INDUSTRIAS QUIMICAS MEXICO S.A. DE C.V.",
         residuos: ["cianuro", "ácido sulfúrico", "reactivos peligrosos", "solventes"],
         estado: "rechazado_automatico",
@@ -26,130 +26,26 @@ const LISTA_MAESTRA =[
     {
         generador: "NISSAN MEXICANA, S.A. DE C.V.",
         residuos: ["INFLAMABLES"],
-        estado: "Rechazado_automatico",
+        estado: "rechazado_automatico", // CORREGIDO: era "Rechazo_automatico"
         motivo: "Residuos de inflamables peligrosos no autorizados"
     }
-    // AÑADE MÁS GENERADORES AQUÍ SIGUIENDO EL MISMO FORMATO
 ];
 
-// PALABRAS CLAVE DE RESIDUOS PELIGROSOS GENERALES
 const PALABRAS_PELIGROSAS = [
-    "material radiactivo",
- "infectante", "biológico peligroso", "corrosivo", "inflamable", "explosivo",
-    "reactivo", "tóxico", "mutagénico", "cancerígeno", "ecotóxico"
+    "material radiactivo", "infectante", "biológico peligroso", "corrosivo", 
+    "inflamable", "explosivo", "reactivo", "tóxico", "mutagénico", 
+    "cancerígeno", "ecotóxico"
 ];
-/ 1. VARIABLES GLOBALES Y CONFIGURACIÓN
+
 // ============================================
-const LISTA_MAESTRA = [ /* tu lista aquí */ ];
-const PALABRAS_PELIGROSAS = [ /* tus palabras aquí */ ];
+// VARIABLES GLOBALES
+// ============================================
 
 let currentImage = null;
 let tesseractWorker = null;
 let cameraStream = null;
 let ultimoResultado = null;
 let historialIncidencias = [];
-
-// ============================================
-// 2. FUNCIONES DE CÁMERA/ARCHIVO (SE DEFINEN PRIMERO)
-// ============================================
-async function openCamera() { /* código */ }
-function handleFileSelect(event) { /* código */ }
-function mostrarImagenPrevia(imageUrl) { /* código */ }
-function captureFromCamera() { /* código */ }
-function closeCamera() { /* código */ }
-
-// ============================================
-// 3. FUNCIÓN PRINCIPAL iniciarAnalisis (¡DEFINIR ANTES DE USAR!)
-// ============================================
-async function iniciarAnalisis() {
-    console.log('🚀 Iniciando análisis de manifiesto...');
-    
-    if (!currentImage) {
-        alert('⚠️ Por favor, capture o suba una imagen del manifiesto primero.');
-        return;
-    }
-    
-    // ... TODO el contenido de tu función iniciarAnalisis ...
-    // (incluyendo el try-catch y llamadas a otras funciones)
-}
-
-// ============================================
-// 4. FUNCIONES DE PROCESAMIENTO
-// ============================================
-async function ejecutarOCR(imagen) {
-    console.log('🔄 [OCR] Iniciando proceso...');
-    
-    document.getElementById('progressText').textContent = 'Preparando OCR...';
-    document.getElementById('progressBar').style.width = '10%';
-    
-    try {
-        const worker = await Tesseract.createWorker('spa');
-        const result = await worker.recognize(imagen);
-        await worker.terminate();
-        
-        document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = '¡Texto extraído!';
-        
-        return result.data.text;
-        
-    } catch (error) {
-        console.error('❌ [OCR] Error:', error);
-        document.getElementById('progressText').textContent = Error: ${error.message};
-        throw new Error(Fallo en OCR: ${error.message});
-    }
-}
-
-function extraerDatosManifiesto(texto) { /* código */ }
-function verificarContraListaMaestra(generador, residuo) { /* código */ }
-
-// ============================================
-// 5. FUNCIONES DE INTERFAZ
-// ============================================
-function mostrarResultadosEnInterfaz(resultado) { /* código */ }
-
-// ============================================
-// 6. INICIALIZACIÓN (setupEventListeners AL FINAL)
-// ============================================
-function setupEventListeners() {
-    console.log('🔧 Configurando eventos...');
-    
-    // Eventos de captura de imagen
-    document.getElementById('cameraBtn').addEventListener('click', openCamera);
-    document.getElementById('uploadBtn').addEventListener('click', () => {
-        document.getElementById('fileInput').click();
-    });
-    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
-    document.getElementById('captureBtn').addEventListener('click', captureFromCamera);
-    document.getElementById('cancelCameraBtn').addEventListener('click', closeCamera);
-    
-    // ✅ AHORA iniciarAnalisis YA ESTÁ DEFINIDA
-    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
-    
-    // Eventos de resultados
-    document.getElementById('newScanBtn').addEventListener('click', reiniciarEscaneo);
-    document.getElementById('downloadReportBtn').addEventListener('click', descargarReporteCompleto);
-    
-    // Eventos de incidencias
-    document.getElementById('registerIncidenceBtn').addEventListener('click', registrarIncidencia);
-    document.getElementById('skipIncidenceBtn').addEventListener('click', omitirIncidencia);
-    document.getElementById('downloadIncidenceReport').addEventListener('click', descargarReporteIncidencia);
-    document.getElementById('newScanAfterIncidence').addEventListener('click', reiniciarEscaneo);
-}
-
-// ============================================
-// 7. INICIALIZAR CUANDO EL DOM ESTÉ LISTO
-// ============================================
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('✅ Sistema de Validación de Manifiestos - Inicializado');
-    
-    if (typeof Tesseract === 'undefined') {
-        console.error('❌ Tesseract.js no se cargó correctamente');
-        mostrarErrorSistema('La biblioteca de OCR no se cargó.');
-        return;
-    }
-    
-    setupEventListeners(); // ← Esto se ejecuta AL FINAL, cuando todo está definido
-});
 
 // ============================================
 // FUNCIONES DE CAPTURA DE IMAGEN (CÁMERA/ARCHIVO)
@@ -195,7 +91,6 @@ async function openCamera() {
         }
         
         alert(mensajeError);
-        // Fallback al selector de archivos
         document.getElementById('fileInput').click();
     }
 }
@@ -218,7 +113,6 @@ function handleFileSelect(event) {
     mostrarImagenPrevia(imageUrl);
     currentImage = file;
     
-    // Habilitar botón de análisis
     document.getElementById('processBtn').disabled = false;
     
     console.log('✅ Imagen cargada correctamente');
@@ -233,7 +127,6 @@ function mostrarImagenPrevia(imageUrl) {
         </button>
     `;
     
-    // Configurar evento para eliminar imagen
     setTimeout(() => {
         document.getElementById('removeImage').addEventListener('click', function() {
             imagePreview.innerHTML = `
@@ -286,66 +179,74 @@ function closeCamera() {
     document.getElementById('cameraView').style.display = 'none';
     document.getElementById('imagePreview').style.display = 'flex';
 }
- // Evento principal de análisis
-    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
-    
+
 // ============================================
 // FUNCIÓN PRINCIPAL DE ANÁLISIS
 // ============================================
 
-async function ejecutarOCR(imagen) {
-    console.log('🔄 [OCR] Iniciando proceso SIN logger...');
+async function iniciarAnalisis() {
+    console.log('🚀 Iniciando análisis de manifiesto...');
     
-    // Si la imagen es una URL blob, la convertimos a File
-    let imagenParaOCR = imagen;
-    if (typeof imagen === 'string' && imagen.startsWith('blob:')) {
-        console.log('[OCR] Convirtiendo URL blob...');
-        try {
-            const response = await fetch(imagen);
-            const blob = await response.blob();
-            imagenParaOCR = new File([blob], 'manifiesto.jpg', { type: 'image/jpeg' });
-        } catch (error) {
-            console.warn('[OCR] No se pudo convertir blob:', error);
-        }
+    if (!currentImage) {
+        alert('⚠️ Por favor, capture o suba una imagen del manifiesto primero.');
+        return;
     }
-
+    
+    // Ocultar sección de captura, mostrar procesamiento
+    document.querySelector('.card:first-of-type').style.display = 'none';
+    document.querySelector('.processing-card').style.display = 'block';
+    document.querySelector('.results-card').style.display = 'none';
+    
+    // Actualizar texto de progreso
+    document.getElementById('progressText').textContent = 'Extrayendo texto del manifiesto...';
+    document.getElementById('progressBar').style.width = '25%';
+    
     try {
-        console.log('[OCR] Creando worker...');
-        document.getElementById('progressText').textContent = 'Configurando OCR (10%)...';
-        document.getElementById('progressBar').style.width = '10%';
+        // 1. EJECUTAR OCR
+        const textoCompleto = await ejecutarOCR(currentImage);
+        document.getElementById('progressBar').style.width = '50%';
+        document.getElementById('progressText').textContent = 'Analizando datos extraídos...';
         
-        // 1. CREAR WORKER SIN LOGGER
-        const worker = await Tesseract.createWorker('spa');
+        // 2. EXTRAER DATOS CLAVE DEL MANIFIESTO
+        const datosExtraidos = extraerDatosManifiesto(textoCompleto);
+        document.getElementById('progressBar').style.width = '75%';
+        document.getElementById('progressText').textContent = 'Verificando contra lista maestra...';
         
-        // Simular progreso inicial
+        // 3. VERIFICAR CONTRA LISTA MAESTRA
+        const resultadoVerificacion = verificarContraListaMaestra(
+            datosExtraidos.razonSocial, 
+            datosExtraidos.descripcionResiduo
+        );
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressText').textContent = 'Generando resultados...';
+        
+        // 4. COMBINAR RESULTADOS
+        ultimoResultado = {
+            ...datosExtraidos,
+            ...resultadoVerificacion,
+            textoOriginal: textoCompleto,
+            fechaAnalisis: new Date().toISOString(),
+            idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
+        };
+        
+        // 5. MOSTRAR RESULTADOS
         setTimeout(() => {
-            document.getElementById('progressText').textContent = 'Cargando núcleo OCR (30%)...';
-            document.getElementById('progressBar').style.width = '30%';
+            document.querySelector('.processing-card').style.display = 'none';
+            document.querySelector('.results-card').style.display = 'block';
+            mostrarResultadosEnInterfaz(ultimoResultado);
+            console.log('✅ Análisis completado exitosamente');
         }, 500);
         
-        // 2. EJECUTAR RECONOCIMIENTO SIN FUNCIÓN LOGGER
-        const result = await worker.recognize(imagenParaOCR);
-        
-        // 3. TERMINAR WORKER
-        await worker.terminate();
-        
-        // Actualizar progreso final
-        document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = 'Texto extraído (100%)!';
-        
-        const textoExtraido = result.data.text;
-        console.log('✅ [OCR] Completado. Caracteres extraídos:', textoExtraido.length);
-        console.log('📄 Muestra (primeras líneas):', textoExtraido.split('\n').slice(0, 5).join('\n'));
-        
-        return textoExtraido;
-
     } catch (error) {
-        console.error('❌ [OCR] Error FATAL:', error);
-        document.getElementById('progressText').textContent = `Error: ${error.message}`;
-        document.getElementById('progressBar').style.backgroundColor = '#dc2626';
-        throw new Error(`Fallo en OCR: ${error.message}`);
+        console.error('❌ Error en el análisis:', error);
+        mostrarError('Error al procesar el manifiesto: ' + error.message);
+        
+        // Restaurar vista
+        document.querySelector('.processing-card').style.display = 'none';
+        document.querySelector('.card:first-of-type').style.display = 'block';
     }
 }
+
 // ============================================
 // FUNCIONES DE PROCESAMIENTO
 // ============================================
@@ -353,74 +254,31 @@ async function ejecutarOCR(imagen) {
 async function ejecutarOCR(imagen) {
     console.log('🔄 [OCR] Iniciando proceso...');
     
-    // Si la imagen es una URL blob, la convertimos a File
-    let imagenParaOCR = imagen;
-    if (typeof imagen === 'string' && imagen.startsWith('blob:')) {
-        console.log('[OCR] Convirtiendo URL blob...');
-        try {
-            const response = await fetch(imagen);
-            const blob = await response.blob();
-            imagenParaOCR = new File([blob], 'manifiesto.jpg', { type: 'image/jpeg' });
-        } catch (error) {
-            console.warn('[OCR] No se pudo convertir blob, usando objeto original:', error);
-        }
-    }
-
+    document.getElementById('progressText').textContent = 'Preparando OCR...';
+    document.getElementById('progressBar').style.width = '10%';
+    
     try {
-        console.log('[OCR] Creando worker...');
-        document.getElementById('progressText').textContent = 'Configurando OCR (0%)...';
-        document.getElementById('progressBar').style.width = '10%';
-        
-        // NOTA: Usamos un worker nuevo cada vez para evitar problemas
         const worker = await Tesseract.createWorker('spa');
         
-        // --- FUNCIÓN LOGGER SEGURA Y SIMPLE (CORREGIDA) ---
-        // Solo pasamos datos primitivos (números, strings) para evitar DataCloneError
-        const result = await worker.recognize(imagenParaOCR, {
-            logger: (m) => {
-                // Filtramos solo los datos seguros para mostrar en consola
-                console.log('[OCR Logger]', m.status, m.progress);
-                
-                // Actualizamos la UI basándonos solo en status y progress
-                if (m.status === 'loading tesseract core') {
-                    document.getElementById('progressText').textContent = 'Cargando núcleo OCR (20%)...';
-                    document.getElementById('progressBar').style.width = '20%';
-                } 
-                else if (m.status === 'loading language traineddata') {
-                    document.getElementById('progressText').textContent = 'Cargando idioma español (40%)...';
-                    document.getElementById('progressBar').style.width = '40%';
-                } 
-                else if (m.status === 'initializing api') {
-                    document.getElementById('progressText').textContent = 'Inicializando (60%)...';
-                    document.getElementById('progressBar').style.width = '60%';
-                } 
-                else if (m.status === 'recognizing text') {
-                    // 'progress' es un número entre 0 y 1, es SEGURO de usar
-                    const porcentaje = Math.round(m.progress * 100);
-                    document.getElementById('progressText').textContent = `Extrayendo texto (${porcentaje}%)...`;
-                    document.getElementById('progressBar').style.width = `${60 + (m.progress * 30)}%;` // De 60% a 90%
-                }
-                // Ignoramos cualquier otro dato complejo en 'm'
-            }
-        });
-
-        console.log('[OCR] Terminando worker...');
+        // Pequeña pausa para mostrar progreso
+        setTimeout(() => {
+            document.getElementById('progressBar').style.width = '40%';
+            document.getElementById('progressText').textContent = 'Procesando imagen...';
+        }, 300);
+        
+        const result = await worker.recognize(imagen);
         await worker.terminate();
         
         document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = 'Texto extraído (100%)!';
+        document.getElementById('progressText').textContent = '¡Texto extraído!';
         
-        const textoExtraido = result.data.text;
-        console.log('✅ [OCR] Completado. Caracteres extraídos:', textoExtraido.length);
-        console.log('📄 Muestra (primeras líneas):', textoExtraido.split('\n').slice(0, 5).join('\n'));
+        console.log('✅ [OCR] Proceso completado.');
         
-        return textoExtraido;
-
+        return result.data.text;
+        
     } catch (error) {
-        console.error('❌ [OCR] Error FATAL:', error);
+        console.error('❌ [OCR] Error:', error);
         document.getElementById('progressText').textContent = `Error: ${error.message}`;
-        document.getElementById('progressBar').style.backgroundColor = '#dc2626';
-        // Lanzamos el error para que la función principal lo maneje
         throw new Error(`Fallo en OCR: ${error.message}`);
     }
 }
@@ -436,28 +294,24 @@ function extraerDatosManifiesto(texto) {
         folio: 'No identificado'
     };
     
-    // Patrones de búsqueda basados en tu imagen del manifiesto
     for (let i = 0; i < lineas.length; i++) {
         const linea = lineas[i];
         
-        // Buscar RAZÓN SOCIAL (punto 2 del formato)
+        // Buscar RAZÓN SOCIAL
         if (linea.match(/RAZ[OÓ]N SOCIAL/i)) {
             if (linea.includes(':')) {
                 datos.razonSocial = linea.split(':')[1].trim();
             } else if (i + 1 < lineas.length) {
-                // Tomar siguiente línea si es el nombre
                 datos.razonSocial = lineas[i + 1].trim();
             }
         }
         
-        // Buscar DESCRIPCIÓN (punto 5 del formato)
+        // Buscar DESCRIPCIÓN
         if (linea.match(/DESCRIPCI[OÓ]N/i)) {
-            // Extraer texto después de "DESCRIPCIÓN"
             const textoDespuesDescripcion = linea.replace(/.DESCRIPCI[OÓ]N\s:?\s*/i, '');
             if (textoDespuesDescripcion.length > 10) {
                 datos.descripcionResiduo = textoDespuesDescripcion.trim();
             } else {
-                // Buscar en las siguientes líneas
                 for (let j = i + 1; j < Math.min(i + 4, lineas.length); j++) {
                     if (lineas[j] && lineas[j].trim().length > 10) {
                         datos.descripcionResiduo = lineas[j].trim();
@@ -467,13 +321,13 @@ function extraerDatosManifiesto(texto) {
             }
         }
         
-        // Buscar fecha (patrones comunes)
+        // Buscar fecha
         if (linea.match(/\d{4}[-\/]\d{2}[-\/]\d{2}/)) {
             const fechaMatch = linea.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/);
             if (fechaMatch) datos.fechaManifiesto = fechaMatch[1];
         }
         
-        // Buscar folio/número (patrones comunes)
+        // Buscar folio/número
         if (linea.match(/(FOLIO|NO\.|NÚMERO|ID)\s*[:]?\s*[\w\d-]+/i)) {
             const folioMatch = linea.match(/(FOLIO|NO\.|NÚMERO|ID)\s*[:]?\s*([\w\d-]+)/i);
             if (folioMatch && folioMatch[2]) {
@@ -617,7 +471,8 @@ function mostrarResultadosEnInterfaz(resultado) {
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
     
-    `resultStatus.className = result-status ${isAcceptable ? 'acceptable' : 'not-acceptable'}`;
+    // CORREGIDO: Faltaban las backticks (`)
+    resultStatus.className = `result-status ${isAcceptable ? 'acceptable' : 'not-acceptable'}`;
     resultStatus.innerHTML = `
         <i class="bi ${isAcceptable ? 'bi-check-circle' : 'bi-x-circle'}"></i>
         <h2>${isAcceptable ? '✅ MANIFIESTO ACEPTADO' : '❌ MANIFIESTO RECHAZADO'}</h2>
@@ -982,6 +837,73 @@ function mostrarErrorSistema(mensaje) {
 }
 
 // ============================================
+// CONFIGURACIÓN DE EVENTOS
+// ============================================
+
+function setupEventListeners() {
+    console.log('🔧 Configurando eventos...');
+    
+    // Eventos de captura de imagen
+    document.getElementById('cameraBtn').addEventListener('click', openCamera);
+    document.getElementById('uploadBtn').addEventListener('click', () => {
+        console.log('📤 Botón subir clickeado');
+        document.getElementById('fileInput').click();
+    });
+    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+    document.getElementById('captureBtn').addEventListener('click', captureFromCamera);
+    document.getElementById('cancelCameraBtn').addEventListener('click', closeCamera);
+    
+    // Evento principal de análisis
+    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
+    
+    // Eventos de resultados
+    document.getElementById('newScanBtn').addEventListener('click', reiniciarEscaneo);
+    document.getElementById('downloadReportBtn').addEventListener('click', descargarReporteCompleto);
+    
+    // Eventos de incidencias
+    document.getElementById('registerIncidenceBtn').addEventListener('click', registrarIncidencia);
+    document.getElementById('skipIncidenceBtn').addEventListener('click', omitirIncidencia);
+    document.getElementById('downloadIncidenceReport').addEventListener('click', descargarReporteIncidencia);
+    document.getElementById('newScanAfterIncidence').addEventListener('click', reiniciarEscaneo);
+}
+
+// ============================================
+// INICIALIZACIÓN DE TESSERACT
+// ============================================
+
+async function inicializarTesseract() {
+    try {
+        console.log('🔄 Inicializando Tesseract.js...');
+        tesseractWorker = await Tesseract.createWorker();
+        await tesseractWorker.loadLanguage('spa');
+        await tesseractWorker.initialize('spa');
+        console.log('✅ Tesseract.js inicializado correctamente para español');
+    } catch (error) {
+        console.error('❌ Error al inicializar Tesseract:', error);
+        mostrarErrorSistema('No se pudo inicializar el sistema de OCR.');
+    }
+}
+
+// ============================================
+// INICIALIZACIÓN DE LA APLICACIÓN
+// ============================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('✅ Sistema de Validación de Manifiestos - Inicializado');
+    console.log('📋 Lista maestra cargada:', LISTA_MAESTRA.length, 'generadores configurados');
+    
+    // Verificar si Tesseract está disponible
+    if (typeof Tesseract === 'undefined') {
+        console.error('❌ Tesseract.js no se cargó correctamente');
+        mostrarErrorSistema('La biblioteca de OCR no se cargó. Por favor, recarga la página.');
+        return;
+    }
+    
+    setupEventListeners();
+    inicializarTesseract();
+});
+
+// ============================================
 // MANEJO DE CIERRE Y LIMPIEZA
 // ============================================
 
@@ -1010,4 +932,4 @@ try {
     console.warn('No se pudo cargar historial de incidencias:', e);
 }
 
-console.log('🎯 Sistema listo para validar manifiestos');
+console.log('🎯 Sistema listo para validar manifiestos');        
