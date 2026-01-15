@@ -311,30 +311,6 @@ async function ejecutarOCR(imagen) {
     }
 }
     
-    // 3. BUSCAR PALABRAS CLAVE PELIGROSAS GENERALES
-    if (resultado.esAceptable) {
-        for (const palabra of PALABRAS_PELIGROSAS) {
-            if (residuoLower.includes(palabra.toLowerCase())) {
-                resultado.coincidencias.push({
-                    tipo: 'palabra_clave_peligrosa',
-                    valor: palabra,
-                    estado: 'revision_requerida',
-                    motivo: 'Contiene término de material peligroso'
-                });
-                
-                resultado.esAceptable = false;
-                resultado.motivo = `⚠️ REQUIERE REVISIÓN: Residuo contiene término peligroso identificado: "${palabra}".`;
-                resultado.nivelRiesgo = 'medio';
-                resultado.accionesRecomendadas = [
-                    'Revisión manual por responsable ambiental.',
-                    'Solicitar hoja de seguridad del material.',
-                    'Validar clasificación del residuo.'
-                ];
-                return resultado;
-            }
-        }
-    }
-    
     // 4. SI NO HUBO NINGUNA COINCIDENCIA
     if (resultado.coincidencias.length === 0) {
         resultado.motivo = '✅ Documento aceptado: Generador y residuo no encontrados en listas reguladas.';
