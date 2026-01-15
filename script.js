@@ -202,113 +202,162 @@ async function iniciarAnalisis() {
     document.getElementById('progressBar').style.width = '25%';
     
     try {
-        // 1. EJECUTAR OCR
-        const textoCompleto = await ejecutarOCR(currentImage);
-        document.getElementById('progressBar').style.width = '50%';
-        document.getElementById('progressText').textContent = 'Analizando datos extraídos...';
-        
-        // 2. EXTRAER DATOS CLAVE DEL MANIFIESTO
-        const datosExtraidos = extraerDatosManifiesto(textoCompleto);
-        document.getElementById('progressBar').style.width = '75%';
-        document.getElementById('progressText').textContent = 'Verificando contra lista maestra...';
-        
-        // 3. VERIFICAR CONTRA LISTA MAESTRA
-        const resultadoVerificacion = verificarContraListaMaestra(
-            datosExtraidos.razonSocial, 
-            datosExtraidos.descripcionResiduo
-        );
-        document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = 'Generando resultados...';
-        
-        // 4. COMBINAR RESULTADOS
-        ultimoResultado = {
-            ...datosExtraidos,
-            ...resultadoVerificacion,
-            textoOriginal: textoCompleto,
-            fechaAnalisis: new Date().toISOString(),
-            idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
-        };
-        
-        // 5. MOSTRAR RESULTADOS
-        setTimeout(() => {
-            document.querySelector('.processing-card').style.display = 'none';
-            document.querySelector('.results-card').style.display = 'block';
-            mostrarResultadosEnInterfaz(ultimoResultado);
-            console.log('✅ Análisis completado exitosamente');
-        }, 500);
-        
-    } catch (error) {
-        console.error('❌ Error en el análisis:', error);
-        mostrarError('Error al procesar el manifiesto: ' + error.message);
-        
-        // Restaurar vista
-        document.querySelector('.processing-card').style.display = 'none';
-        document.querySelector('.card:first-of-type').style.display = 'block';
+       function extraerDatosManifiesto(texto) {
+    const resultado = {
+        razonSocial: 'Desconocido',
+        descripcionResiduo: 'Desconocido',
+        fechaManifiesto: 'Desconocido',
+        folio: 'Desconocido'
+    };
+
+    if (!texto || typeof texto !== 'string') return resultado;
+
+    // Normalizar y dividir en líneas
+    const textoNorm = texto.replace(/\t/g, ' ');
+    const lines = textoNorm.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    // Buscar folio (varios patrones)
+    const folioRegexes = [
+        /\bFOLIO[:\s\-]*([A-Z0-9\-]{3,})\b/i,
+        /\bNo\.?\s*[:\s\-]*([A-Z0-9\-]{3,})\b/i,
+        /\bFolio[:\s\-]*([^\s]+)/i
+    ];
+    for (const rx of folioRegexes) {
+        const m = texto.match(rx);
+        if (m) {
+            resultado.folio = m[1].trim();
+            break;
+        }
     }
+
+    // Buscar fecha (dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd)
+    const fechaMatch = texto.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) ||
+                       texto.match(/(\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b)/);
+    if (fechaMatch) resultado.fechaManifiesto = fechaMatch[1];
+
+    // Heurística para razón social: buscar línea en mayúsculas o con clave empresarial
+    for (let i = 0; i < Math.min(lines.length, 12); i++) {
+        const ln = lines[i];
+        const uppercaseRatio = (ln.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length) / Math.max(1, ln.length);
+        if (ln.length > 6 && (/[A-ZÁÉÍÓÚÑ]/.test(ln) && uppercaseRatio > 0.3)) {
+            resultado.razonSocial = ln;
+            break;
+        }
+    }
+
+    // Buscar descripción de residuo por etiquetas comunes
+    const residuoRx = /(RESIDUO(?:S)?[:\s\-]+(.+))/i;
+    const descrRx = /(DESCRIPCI[oó]N(?: DEL)? RESIDUO[:\s\-]+(.+))/i;
+    const tipoRx = /(TIPO DE RESIDUO[:\s\-]+(.+))/i;
+    let m = texto.match(descrRx) || texto.match(residuoRx) || texto.match(tipoRx);
+    if (m) {
+        resultado.descripcionResiduo = (m[2] || m[1]).trim();
+    } else {
+        const candidate = lines.find(l => /residuo|residuos|basura|residuo peligroso|infectante|inflamable|reactivo|residuo industrial/i.test(l));
+        if (candidate) resultado.descripcionResiduo = candidate;
+    }
+
+    return resultado;
 }
 
-// ============================================
-// FUNCIONES DE PROCESAMIENTO
-// ============================================
+function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
+    const resultado = {
+        esAceptable: true,
+        coincidencias: [],
+        motivo: '',
+        nivelRiesgo: 'bajo',
+        accionesRecomendadas: []
+    };
 
-async function ejecutarOCR(imagen) {
-    console.log('🔄 [OCR] Iniciando proceso...');
-    
-    document.getElementById('progressText').textContent = 'Preparando OCR...';
-    document.getElementById('progressBar').style.width = '10%';
-    
-    try {
-        console.log('🔧 Creando worker de Tesseract...');
-        
-        // SOLUCIÓN: Usar la API simplificada de Tesseract
-        const { createWorker } = Tesseract;
-        
-        const worker = await createWorker({
-            logger: m => {
-                console.log('📊 Progreso OCR:', m);
-                if (m.status === 'recognizing text') {
-                    document.getElementById('progressText').textContent = `Procesando: ${Math.round(m.progress * 100)}%`;
-                    document.getElementById('progressBar').style.width = `${10 + (m.progress * 60)}%`;
+    const razonLower = (razonSocial || '').toLowerCase();
+    const residuoLower = (descripcionResiduo || '').toLowerCase();
+
+    // 1) Revisar generadores y residuos específicos en LISTA_MAESTRA
+    for (const item of LISTA_MAESTRA) {
+        const genLower = (item.generador || '').toLowerCase();
+
+        if (genLower && (razonLower.includes(genLower) || genLower === razonLower)) {
+            resultado.coincidencias.push({
+                tipo: 'generador',
+                valor: item.generador,
+                estado: item.estado,
+                motivo: item.motivo
+            });
+
+            if (item.estado && item.estado.includes('rechaz')) {
+                resultado.esAceptable = false;
+                resultado.motivo = `❌ RECHAZADO: Generador identificado en lista maestra (${item.generador})`;
+                resultado.nivelRiesgo = 'alto';
+                resultado.accionesRecomendadas = ['No aceptar ingreso. Contactar con coordinador ambiental.'];
+            } else if (item.estado && item.estado.includes('requiere')) {
+                resultado.esAceptable = false;
+                resultado.motivo = `⚠️ REQUIERE REVISIÓN: Generador identificado (${item.generador})`;
+                resultado.nivelRiesgo = 'medio';
+                resultado.accionesRecomendadas = ['Revisión de documentación adicional.'];
+            }
+        }
+
+        // coincidencia por residuo específico
+        if (Array.isArray(item.residuos)) {
+            for (const res of item.residuos) {
+                const resLower = (res || '').toLowerCase();
+                if (resLower && (residuoLower.includes(resLower) || resLower === residuoLower)) {
+                    resultado.coincidencias.push({
+                        tipo: 'residuo_especifico',
+                        valor: res,
+                        estado: item.estado,
+                        motivo: item.motivo
+                    });
+
+                    if (item.estado && item.estado.includes('rechaz')) {
+                        resultado.esAceptable = false;
+                        resultado.motivo = `❌ RECHAZADO: Residuo (${res}) no autorizado.`;
+                        resultado.nivelRiesgo = 'alto';
+                        resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar normativa.'];
+                    } else if (item.estado && item.estado.includes('requiere')) {
+                        resultado.esAceptable = false;
+                        resultado.motivo = `⚠️ REQUIERE REVISIÓN: Residuo (${res}) requiere documentación adicional.`;
+                        resultado.nivelRiesgo = 'medio';
+                        resultado.accionesRecomendadas = ['Solicitar documentación adicional.'];
+                    }
                 }
             }
-        });
-        
-        // Inicializar con español
-        await worker.loadLanguage('spa');
-        await worker.initialize('spa');
-        
-        document.getElementById('progressBar').style.width = '70%';
-        document.getElementById('progressText').textContent = 'Extrayendo texto...';
-        
-        // Realizar OCR
-        console.log('🔍 Reconociendo texto...');
-        const { data: { text } } = await worker.recognize(imagen);
-        
-        // Terminar worker
-        await worker.terminate();
-        
-        document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = '¡Texto extraído!';
-        
-        console.log('✅ [OCR] Proceso completado exitosamente');
-        console.log('📝 Texto extraído (primeros 200 caracteres):', text.substring(0, 200));
-        
-        return text;
-        
-    } catch (error) {
-        console.error('❌ [OCR] Error detallado:', error);
-        
-        // Mostrar error específico
-        let mensajeError = 'Error en OCR: ';
-        if (error.message.includes('SetImageFile')) {
-            mensajeError += 'Problema con el procesamiento de imagen. Intenta con otra imagen.';
-        } else {
-            mensajeError += error.message;
         }
-        
-        document.getElementById('progressText').textContent = `Error: ${mensajeError}`;
-        throw new Error(mensajeError);
     }
+
+    // 2) Buscar palabras peligrosas si aún aceptable
+    if (resultado.esAceptable) {
+        for (const palabra of PALABRAS_PELIGROSAS) {
+            if (!palabra) continue;
+            const p = palabra.toLowerCase();
+            if (residuoLower.includes(p) || razonLower.includes(p)) {
+                resultado.coincidencias.push({
+                    tipo: 'palabra_clave_peligrosa',
+                    valor: palabra,
+                    estado: 'revision_requerida',
+                    motivo: 'Contiene término de material peligroso'
+                });
+
+                resultado.esAceptable = false;
+                resultado.motivo = `⚠️ REQUIERE REVISIÓN: Se detectó término peligroso: "${palabra}".`;
+                resultado.nivelRiesgo = 'medio';
+                resultado.accionesRecomendadas = [
+                    'Revisión manual por responsable ambiental.',
+                    'Solicitar hoja de seguridad del material.',
+                    'Validar clasificación del residuo.'
+                ];
+                break;
+            }
+        }
+    }
+
+    // 3) Si no hay coincidencias
+    if (resultado.coincidencias.length === 0) {
+        resultado.motivo = '✅ Documento aceptado: Generador y residuo no encontrados en listas reguladas.';
+        resultado.accionesRecomendadas = ['Archivar según procedimiento estándar.'];
+    }
+
+    return resultado;
 }
 // ============================================
 // FUNCIONES DE INTERFAZ DE RESULTADOS
