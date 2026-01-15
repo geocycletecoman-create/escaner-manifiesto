@@ -1,5 +1,5 @@
 const LISTA_MAESTRA = [
-  {
+    {
         generador: "SYNTHON MEXICO SA DE CV",
         residuos: ["MEDICAMENTO CADUCO Y OBSOLETO Y EMPAQUE PRIMARIO"],
         estado: "requiere_permiso_especial",
@@ -32,15 +32,14 @@ const LISTA_MAESTRA = [
 ];
 
 const PALABRAS_PELIGROSAS = [
-    "material radiactivo", "infectante", "biológico peligroso", "corrosivo", 
-    "inflamable", "explosivo", "reactivo", "tóxico", "mutagénico", 
+    "material radiactivo", "infectante", "biológico peligroso", "corrosivo",
+    "inflamable", "explosivo", "reactivo", "tóxico", "mutagénico",
     "cancerígeno", "ecotóxico"
 ];
 
 // ============================================
 // VARIABLES GLOBALES
 // ============================================
-
 let currentImage = null;
 let tesseractWorker = null;
 let cameraStream = null;
@@ -48,17 +47,15 @@ let ultimoResultado = null;
 let historialIncidencias = [];
 
 // ============================================
-// FUNCIONES DE CAPTURA DE IMAGEN (CÁMERA/ARCHIVO)
+// FUNCIONES DE CAPTURA DE IMAGEN (CÁMARA/ARCHIVO)
 // ============================================
-
 async function openCamera() {
     console.log('📷 Intentando abrir cámara...');
-    
     try {
         if (cameraStream) {
             cameraStream.getTracks().forEach(track => track.stop());
         }
-        
+
         cameraStream = await navigator.mediaDevices.getUserMedia({
             video: {
                 facingMode: 'environment',
@@ -67,20 +64,19 @@ async function openCamera() {
             },
             audio: false
         });
-        
+
         console.log('✅ Cámara accedida exitosamente');
-        
+
         const cameraView = document.getElementById('cameraView');
         const cameraStreamElement = document.getElementById('cameraStream');
         const imagePreview = document.getElementById('imagePreview');
-        
-        cameraStreamElement.srcObject = cameraStream;
-        cameraView.style.display = 'block';
-        imagePreview.style.display = 'none';
-        
+
+        if (cameraStreamElement) cameraStreamElement.srcObject = cameraStream;
+        if (cameraView) cameraView.style.display = 'block';
+        if (imagePreview) imagePreview.style.display = 'none';
+
     } catch (error) {
         console.error('❌ Error al acceder a la cámara:', error);
-        
         let mensajeError = 'No se pudo acceder a la cámara. ';
         if (error.name === 'NotAllowedError') {
             mensajeError += 'Permiso denegado. Por favor, permite el acceso a la cámara.';
@@ -89,95 +85,91 @@ async function openCamera() {
         } else {
             mensajeError += error.message;
         }
-        
         alert(mensajeError);
-        document.getElementById('fileInput').click();
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) fileInput.click();
     }
 }
 
 function handleFileSelect(event) {
     console.log('📄 Archivo seleccionado');
-    
-    const file = event.target.files[0];
+    const file = event.target.files ? event.target.files[0] : null;
     if (!file) {
         console.log('⚠️ No se seleccionó archivo');
         return;
     }
-    
     if (!file.type.match('image.*')) {
         alert('❌ Por favor, selecciona una imagen (JPEG, PNG, etc.)');
         return;
     }
-    
     const imageUrl = URL.createObjectURL(file);
     mostrarImagenPrevia(imageUrl);
     currentImage = file;
-    
-    document.getElementById('processBtn').disabled = false;
-    
+    const processBtn = document.getElementById('processBtn');
+    if (processBtn) processBtn.disabled = false;
     console.log('✅ Imagen cargada correctamente');
 }
 
 function mostrarImagenPrevia(imageUrl) {
     const imagePreview = document.getElementById('imagePreview');
+    if (!imagePreview) return;
     imagePreview.innerHTML = `
         <img src="${imageUrl}" alt="Manifiesto cargado" style="max-width: 100%; max-height: 380px;">
         <button id="removeImage" class="btn btn-danger" style="margin-top: 20px;">
             <i class="bi bi-trash"></i> Eliminar Imagen
         </button>
     `;
-    
     setTimeout(() => {
-        document.getElementById('removeImage').addEventListener('click', function() {
+        const btn = document.getElementById('removeImage');
+        if (!btn) return;
+        btn.addEventListener('click', function () {
             imagePreview.innerHTML = `
                 <p><i class="bi bi-image" style="font-size: 3rem; color: #ccc;"></i></p>
                 <p>No hay imagen seleccionada</p>
             `;
             currentImage = null;
-            document.getElementById('processBtn').disabled = true;
+            const processBtn = document.getElementById('processBtn');
+            if (processBtn) processBtn.disabled = true;
         });
     }, 100);
 }
 
 function captureFromCamera() {
     console.log('📸 Capturando foto desde cámara...');
-    
     const cameraStreamElement = document.getElementById('cameraStream');
     if (!cameraStreamElement) return;
-    
+
     const canvas = document.createElement('canvas');
     const video = cameraStreamElement;
-    
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    
+
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    canvas.toBlob(function(blob) {
+
+    canvas.toBlob(function (blob) {
         if (!blob) return;
-        
         const file = new File([blob], 'captura_manifiesto.jpg', { type: 'image/jpeg' });
         mostrarImagenPrevia(URL.createObjectURL(file));
         currentImage = file;
-        
         closeCamera();
-        document.getElementById('processBtn').disabled = false;
-        
+        const processBtn = document.getElementById('processBtn');
+        if (processBtn) processBtn.disabled = false;
         console.log('✅ Foto capturada correctamente');
     }, 'image/jpeg', 0.9);
 }
 
 function closeCamera() {
     console.log('🛑 Cerrando cámara...');
-    
     if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
         cameraStream = null;
     }
-    
-    document.getElementById('cameraView').style.display = 'none';
-    document.getElementById('imagePreview').style.display = 'flex';
+    const cameraView = document.getElementById('cameraView');
+    const imagePreview = document.getElementById('imagePreview');
+    if (cameraView) cameraView.style.display = 'none';
+    if (imagePreview) imagePreview.style.display = 'flex';
 }
 
 // ============================================
@@ -186,23 +178,143 @@ function closeCamera() {
 
 async function iniciarAnalisis() {
     console.log('🚀 Iniciando análisis de manifiesto...');
-    
     if (!currentImage) {
         alert('⚠️ Por favor, capture o suba una imagen del manifiesto primero.');
         return;
     }
-    
+
     // Ocultar sección de captura, mostrar procesamiento
-    document.querySelector('.card:first-of-type').style.display = 'none';
-    document.querySelector('.processing-card').style.display = 'block';
-    document.querySelector('.results-card').style.display = 'none';
-    
+    const firstCard = document.querySelector('.card:first-of-type');
+    if (firstCard) firstCard.style.display = 'none';
+    const processingCard = document.querySelector('.processing-card');
+    if (processingCard) processingCard.style.display = 'block';
+    const resultsCard = document.querySelector('.results-card');
+    if (resultsCard) resultsCard.style.display = 'none';
+
     // Actualizar texto de progreso
-    document.getElementById('progressText').textContent = 'Extrayendo texto del manifiesto...';
-    document.getElementById('progressBar').style.width = '25%';
-    
+    const progressText = document.getElementById('progressText');
+    const progressBar = document.getElementById('progressBar');
+    if (progressText) progressText.textContent = 'Extrayendo texto del manifiesto...';
+    if (progressBar) progressBar.style.width = '25%';
+
     try {
-       function extraerDatosManifiesto(texto) {
+        // 1. EJECUTAR OCR
+        const textoCompleto = await ejecutarOCR(currentImage);
+        if (progressBar) progressBar.style.width = '50%';
+        if (progressText) progressText.textContent = 'Analizando datos extraídos...';
+
+        // 2. EXTRAER DATOS CLAVE DEL MANIFIESTO
+        const datosExtraidos = extraerDatosManifiesto(textoCompleto);
+        if (progressBar) progressBar.style.width = '75%';
+        if (progressText) progressText.textContent = 'Verificando contra lista maestra...';
+
+        // 3. VERIFICAR CONTRA LISTA MAESTRA
+        const resultadoVerificacion = verificarContraListaMaestra(
+            datosExtraidos.razonSocial,
+            datosExtraidos.descripcionResiduo
+        );
+        if (progressBar) progressBar.style.width = '100%';
+        if (progressText) progressText.textContent = 'Generando resultados...';
+
+        // 4. COMBINAR RESULTADOS
+        ultimoResultado = {
+            ...datosExtraidos,
+            ...resultadoVerificacion,
+            textoOriginal: textoCompleto,
+            fechaAnalisis: new Date().toISOString(),
+            idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
+        };
+
+        // 5. MOSTRAR RESULTADOS
+        setTimeout(() => {
+            const processingCard = document.querySelector('.processing-card');
+            if (processingCard) processingCard.style.display = 'none';
+            const resultsCard = document.querySelector('.results-card');
+            if (resultsCard) resultsCard.style.display = 'block';
+            mostrarResultadosEnInterfaz(ultimoResultado);
+            console.log('✅ Análisis completado exitosamente');
+        }, 500);
+
+    } catch (error) {
+        console.error('❌ Error en el análisis:', error);
+        mostrarError('Error al procesar el manifiesto: ' + (error && error.message ? error.message : error));
+        // Restaurar vista
+        const processingCard = document.querySelector('.processing-card');
+        if (processingCard) processingCard.style.display = 'none';
+        const firstCard = document.querySelector('.card:first-of-type');
+        if (firstCard) firstCard.style.display = 'block';
+    }
+}
+
+// ============================================
+// FUNCIONES DE PROCESAMIENTO / OCR
+// ============================================
+
+async function ejecutarOCR(imagen) {
+    console.log('🔄 [OCR] Iniciando proceso...');
+    if (!imagen) throw new Error('No hay imagen para procesar');
+
+    const progressText = document.getElementById('progressText');
+    const progressBar = document.getElementById('progressBar');
+
+    if (progressText) progressText.textContent = 'Preparando OCR...';
+    if (progressBar) progressBar.style.width = '10%';
+
+    let workerLocal = null;
+    const useGlobal = Boolean(tesseractWorker);
+
+    try {
+        if (useGlobal) {
+            workerLocal = tesseractWorker;
+        } else {
+            if (typeof Tesseract === 'undefined') {
+                throw new Error('Tesseract no está disponible en el entorno');
+            }
+            const { createWorker } = Tesseract;
+            workerLocal = await createWorker({
+                logger: m => {
+                    console.log('📊 Progreso OCR (temporal):', m);
+                    if (m.status === 'recognizing text') {
+                        if (progressText) progressText.textContent = `Procesando: ${Math.round(m.progress * 100)}%`;
+                        if (progressBar) progressBar.style.width = `${10 + (m.progress * 60)}%`;
+                    }
+                }
+            });
+            await workerLocal.loadLanguage('spa');
+            await workerLocal.initialize('spa');
+        }
+
+        if (progressBar) progressBar.style.width = '70%';
+        if (progressText) progressText.textContent = 'Extrayendo texto...';
+
+        // Si imagen es File/Blob, pasar directamente; Tesseract puede aceptar URL o blob
+        const { data: { text } } = await workerLocal.recognize(imagen);
+
+        if (progressBar) progressBar.style.width = '100%';
+        if (progressText) progressText.textContent = '¡Texto extraído!';
+
+        // Si creamos worker local temporal, terminarlo para liberar recursos
+        if (!useGlobal && workerLocal && typeof workerLocal.terminate === 'function') {
+            await workerLocal.terminate();
+        }
+
+        console.log('✅ [OCR] Proceso completado exitosamente');
+        console.log('📝 Texto extraído (primeros 200 caracteres):', text ? text.substring(0, 200) : '');
+        return text || '';
+
+    } catch (error) {
+        console.error('❌ [OCR] Error detallado:', error);
+        let mensajeError = 'Error en OCR: ' + (error && error.message ? error.message : error);
+        if (progressText) progressText.textContent = `Error: ${mensajeError}`;
+        throw new Error(mensajeError);
+    }
+}
+
+// ============================================
+// FUNCIONES DE EXTRACCIÓN Y VERIFICACIÓN
+// ============================================
+
+function extraerDatosManifiesto(texto) {
     const resultado = {
         razonSocial: 'Desconocido',
         descripcionResiduo: 'Desconocido',
@@ -212,11 +324,10 @@ async function iniciarAnalisis() {
 
     if (!texto || typeof texto !== 'string') return resultado;
 
-    // Normalizar y dividir en líneas
     const textoNorm = texto.replace(/\t/g, ' ');
     const lines = textoNorm.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-    // Buscar folio (varios patrones)
+    // Buscar folio
     const folioRegexes = [
         /\bFOLIO[:\s\-]*([A-Z0-9\-]{3,})\b/i,
         /\bNo\.?\s*[:\s\-]*([A-Z0-9\-]{3,})\b/i,
@@ -230,12 +341,12 @@ async function iniciarAnalisis() {
         }
     }
 
-    // Buscar fecha (dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd)
+    // Buscar fecha
     const fechaMatch = texto.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) ||
-                       texto.match(/(\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b)/);
+        texto.match(/(\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b)/);
     if (fechaMatch) resultado.fechaManifiesto = fechaMatch[1];
 
-    // Heurística para razón social: buscar línea en mayúsculas o con clave empresarial
+    // Heurística para razón social
     for (let i = 0; i < Math.min(lines.length, 12); i++) {
         const ln = lines[i];
         const uppercaseRatio = (ln.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length) / Math.max(1, ln.length);
@@ -245,7 +356,7 @@ async function iniciarAnalisis() {
         }
     }
 
-    // Buscar descripción de residuo por etiquetas comunes
+    // Descripción de residuo
     const residuoRx = /(RESIDUO(?:S)?[:\s\-]+(.+))/i;
     const descrRx = /(DESCRIPCI[oó]N(?: DEL)? RESIDUO[:\s\-]+(.+))/i;
     const tipoRx = /(TIPO DE RESIDUO[:\s\-]+(.+))/i;
@@ -272,7 +383,6 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     const razonLower = (razonSocial || '').toLowerCase();
     const residuoLower = (descripcionResiduo || '').toLowerCase();
 
-    // 1) Revisar generadores y residuos específicos en LISTA_MAESTRA
     for (const item of LISTA_MAESTRA) {
         const genLower = (item.generador || '').toLowerCase();
 
@@ -297,7 +407,6 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
             }
         }
 
-        // coincidencia por residuo específico
         if (Array.isArray(item.residuos)) {
             for (const res of item.residuos) {
                 const resLower = (res || '').toLowerCase();
@@ -325,7 +434,6 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
         }
     }
 
-    // 2) Buscar palabras peligrosas si aún aceptable
     if (resultado.esAceptable) {
         for (const palabra of PALABRAS_PELIGROSAS) {
             if (!palabra) continue;
@@ -351,7 +459,6 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
         }
     }
 
-    // 3) Si no hay coincidencias
     if (resultado.coincidencias.length === 0) {
         resultado.motivo = '✅ Documento aceptado: Generador y residuo no encontrados en listas reguladas.';
         resultado.accionesRecomendadas = ['Archivar según procedimiento estándar.'];
@@ -359,53 +466,58 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
 
     return resultado;
 }
+
 // ============================================
 // FUNCIONES DE INTERFAZ DE RESULTADOS
 // ============================================
-
 function mostrarResultadosEnInterfaz(resultado) {
     console.log('🖥️ Mostrando resultados en interfaz...');
-    
+    if (!resultado) return;
+
     // 1. Mostrar datos extraídos
-    document.getElementById('detectedCompany').textContent = resultado.razonSocial;
-    document.getElementById('detectedWaste').textContent = resultado.descripcionResiduo;
-    document.getElementById('detectedDate').textContent = resultado.fechaManifiesto;
-    document.getElementById('detectedFolio').textContent = resultado.folio;
-    
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value || '';
+    };
+    setText('detectedCompany', resultado.razonSocial);
+    setText('detectedWaste', resultado.descripcionResiduo);
+    setText('detectedDate', resultado.fechaManifiesto);
+    setText('detectedFolio', resultado.folio);
+
     // 2. Mostrar veredicto principal
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
-    
-    // CORREGIDO: Faltaban las backticks (`)
-    resultStatus.className = `result-status ${isAcceptable ? 'acceptable' : 'not-acceptable'}`;
-    resultStatus.innerHTML = `
-        <i class="bi ${isAcceptable ? 'bi-check-circle' : 'bi-x-circle'}"></i>
-        <h2>${isAcceptable ? '✅ MANIFIESTO ACEPTADO' : '❌ MANIFIESTO RECHAZADO'}</h2>
-        <p><strong>${resultado.motivo}</strong></p>
-        <p class="risk-level">Nivel de riesgo: <span class="risk-badge ${resultado.nivelRiesgo.replace('-', '_')}">${resultado.nivelRiesgo.toUpperCase().replace('-', ' ')}</span></p>
-    `;
-    
+    if (resultStatus) {
+        resultStatus.className = `result-status ${isAcceptable ? 'acceptable' : 'not-acceptable'}`;
+        resultStatus.innerHTML = `
+            <i class="bi ${isAcceptable ? 'bi-check-circle' : 'bi-x-circle'}"></i>
+            <h2>${isAcceptable ? '✅ MANIFIESTO ACEPTADO' : '❌ MANIFIESTO RECHAZADO'}</h2>
+            <p><strong>${resultado.motivo}</strong></p>
+            <p class="risk-level">Nivel de riesgo: <span class="risk-badge ${resultado.nivelRiesgo.replace('-', '_')}">${resultado.nivelRiesgo.toUpperCase().replace('-', ' ')}</span></p>
+        `;
+    }
+
     // 3. Mostrar detalles de verificación
     const verificationContent = document.getElementById('verificationContent');
     let detallesHTML = '';
-    
-    if (resultado.coincidencias.length > 0) {
+
+    if (resultado.coincidencias && resultado.coincidencias.length > 0) {
         detallesHTML += `<div class="matches-found">`;
         detallesHTML += `<p><strong>Coincidencias encontradas en listas reguladas:</strong></p>`;
         detallesHTML += `<ul class="matches-list">`;
-        
+
         resultado.coincidencias.forEach(coinc => {
             let icono = '';
             let clase = '';
-            
+
             if (coinc.tipo === 'generador') icono = '<i class="bi bi-building"></i>';
             else if (coinc.tipo === 'residuo_especifico') icono = '<i class="bi bi-droplet"></i>';
             else icono = '<i class="bi bi-exclamation-triangle"></i>';
-            
-            if (coinc.estado.includes('rechazado')) clase = 'match-rejected';
-            else if (coinc.estado.includes('requiere')) clase = 'match-requires';
+
+            if ((coinc.estado || '').includes('rechaz')) clase = 'match-rejected';
+            else if ((coinc.estado || '').includes('requiere')) clase = 'match-requires';
             else clase = 'match-warning';
-            
+
             detallesHTML += `
                 <li class="${clase}">
                     ${icono}
@@ -415,10 +527,10 @@ function mostrarResultadosEnInterfaz(resultado) {
                 </li>
             `;
         });
-        
+
         detallesHTML += `</ul>`;
-        
-        if (resultado.accionesRecomendadas.length > 0) {
+
+        if (resultado.accionesRecomendadas && resultado.accionesRecomendadas.length > 0) {
             detallesHTML += `<div class="recommended-actions">`;
             detallesHTML += `<p><strong>Acciones recomendadas:</strong></p>`;
             detallesHTML += `<ol>`;
@@ -428,7 +540,7 @@ function mostrarResultadosEnInterfaz(resultado) {
             detallesHTML += `</ol>`;
             detallesHTML += `</div>`;
         }
-        
+
         detallesHTML += `</div>`;
     } else {
         detallesHTML += `
@@ -439,91 +551,85 @@ function mostrarResultadosEnInterfaz(resultado) {
             </div>
         `;
     }
-    
-    verificationContent.innerHTML = detallesHTML;
-    
+
+    if (verificationContent) verificationContent.innerHTML = detallesHTML;
+
     // 4. Mostrar/ocultar sección de incidencias si es RECHAZADO
     const incidenceSection = document.getElementById('incidenceSection');
     const incidenceForm = document.querySelector('.incidence-form');
     const incidenceConfirmation = document.getElementById('incidenceConfirmation');
-    
+
     if (!isAcceptable) {
-        incidenceSection.style.display = 'block';
-        incidenceForm.style.display = 'block';
-        incidenceConfirmation.style.display = 'none';
-        
-        // Pre-llenar el textarea con el motivo del rechazo
-        document.getElementById('incidenceNotes').value = `MOTIVO DEL RECHAZO AUTOMÁTICO:\n${resultado.motivo}\n\nDATOS DEL MANIFIESTO:\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\n\nOBSERVACIONES ADICIONALES:\n`;
-        
-        // Enfocar el campo de observaciones
-        setTimeout(() => {
-            document.getElementById('incidenceNotes').focus();
-        }, 300);
-        
+        if (incidenceSection) incidenceSection.style.display = 'block';
+        if (incidenceForm) incidenceForm.style.display = 'block';
+        if (incidenceConfirmation) incidenceConfirmation.style.display = 'none';
+
+        const incidenceNotes = document.getElementById('incidenceNotes');
+        if (incidenceNotes) {
+            incidenceNotes.value = `MOTIVO DEL RECHAZO AUTOMÁTICO:\n${resultado.motivo}\n\nDATOS DEL MANIFIESTO:\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\n\nOBSERVACIONES ADICIONALES:\n`;
+            setTimeout(() => incidenceNotes.focus(), 300);
+        }
     } else {
-        incidenceSection.style.display = 'none';
+        if (incidenceSection) incidenceSection.style.display = 'none';
     }
-    
+
     // 5. Desplazar suavemente a los resultados
     setTimeout(() => {
-        document.querySelector('.results-card').scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'start' 
-        });
+        const resultsCard = document.querySelector('.results-card');
+        if (resultsCard) resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
-    
+
     console.log('✅ Resultados mostrados correctamente');
 }
 
 // ============================================
 // FUNCIONES DE GESTIÓN DE INCIDENCIAS
 // ============================================
-
 function registrarIncidencia() {
     console.log('📝 Registrando incidencia...');
-    
     if (!ultimoResultado) {
         alert('⚠️ No hay resultados de análisis para registrar incidencia.');
         return;
     }
-    
-    const notas = document.getElementById('incidenceNotes').value.trim();
-    const asignadoA = document.getElementById('assignedTo').value.trim() || 'No asignado';
-    
+
+    const notasEl = document.getElementById('incidenceNotes');
+    const assignedEl = document.getElementById('assignedTo');
+    const notas = notasEl ? notasEl.value.trim() : '';
+    const asignadoA = assignedEl ? assignedEl.value.trim() : 'No asignado';
+
     if (!notas) {
         alert('⚠️ Por favor, ingrese observaciones para la incidencia.');
-        document.getElementById('incidenceNotes').focus();
+        if (notasEl) notasEl.focus();
         return;
     }
-    
-    // Generar ID único para la incidencia
+
     const incidenciaId = 'INC-' + Date.now().toString().slice(-8);
-    
-    // Crear objeto de incidencia
+
     const incidencia = {
         id: incidenciaId,
         fecha: new Date().toLocaleString(),
         notas: notas,
-        asignadoA: asignadoA,
+        asignadoA: asignadoA || 'No asignado',
         resultadoAnalisis: ultimoResultado,
         estado: 'registrada',
-        prioridad: ultimoResultado.nivelRiesgo === 'alto' ? 'alta' : 'media'
+        prioridad: (ultimoResultado && ultimoResultado.nivelRiesgo === 'alto') ? 'alta' : 'media'
     };
-    
-    // Guardar en historial
+
     historialIncidencias.push(incidencia);
     console.log('✅ Incidencia registrada:', incidencia);
-    
-    // Mostrar confirmación
-    document.querySelector('.incidence-form').style.display = 'none';
+
+    const form = document.querySelector('.incidence-form');
+    if (form) form.style.display = 'none';
     const confirmationDiv = document.getElementById('incidenceConfirmation');
-    document.getElementById('confirmationMessage').innerHTML = 
-        `La incidencia ha sido registrada con el ID <strong>${incidenciaId}</strong>.<br>
-         Prioridad: <strong>${incidencia.prioridad.toUpperCase()}</strong><br>
-         Asignada a: <strong>${asignadoA}</strong>`;
-    confirmationDiv.style.display = 'block';
-    
-    // Guardar en localStorage (persistencia simple)
+    const confirmationMessage = document.getElementById('confirmationMessage');
+    if (confirmationMessage) {
+        confirmationMessage.innerHTML =
+            `La incidencia ha sido registrada con el ID <strong>${incidenciaId}</strong>.<br>
+             Prioridad: <strong>${incidencia.prioridad.toUpperCase()}</strong><br>
+             Asignada a: <strong>${incidencia.asignadoA}</strong>`;
+    }
+    if (confirmationDiv) confirmationDiv.style.display = 'block';
+
     try {
         localStorage.setItem('historialIncidencias', JSON.stringify(historialIncidencias));
     } catch (e) {
@@ -533,7 +639,6 @@ function registrarIncidencia() {
 
 function omitirIncidencia() {
     console.log('⏭️ Omitiendo registro de incidencia');
-    
     const confirmacion = confirm('¿Está seguro de omitir el registro de incidencia? El rechazo no será registrado para seguimiento.');
     if (confirmacion) {
         alert('Incidencia omitida. Puede continuar con nuevo escaneo.');
@@ -546,17 +651,14 @@ function descargarReporteIncidencia() {
         alert('⚠️ No hay incidencias registradas para descargar.');
         return;
     }
-    
     const ultimaIncidencia = historialIncidencias[historialIncidencias.length - 1];
     const contenido = generarReporteIncidencia(ultimaIncidencia);
-    
     descargarArchivo(contenido, `incidencia_${ultimaIncidencia.id}.txt`, 'text/plain');
     console.log('📥 Reporte de incidencia descargado');
 }
 
 function generarReporteIncidencia(incidencia) {
-    const resultado = incidencia.resultadoAnalisis;
-    
+    const resultado = incidencia.resultadoAnalisis || {};
     return `
 ================================================================
        REPORTE DE INCIDENCIA - MANIFIESTO RECHAZADO
@@ -572,33 +674,33 @@ Asignado a:          ${incidencia.asignadoA}
 
 DATOS DEL MANIFIESTO RECHAZADO:
 -------------------------------
-Generador:           ${resultado.razonSocial}
-Residuo:             ${resultado.descripcionResiduo}
-Fecha Manifiesto:    ${resultado.fechaManifiesto}
-Folio:               ${resultado.folio}
-ID del Análisis:     ${resultado.idAnalisis}
+Generador:           ${resultado.razonSocial || ''}
+Residuo:             ${resultado.descripcionResiduo || ''}
+Fecha Manifiesto:    ${resultado.fechaManifiesto || ''}
+Folio:               ${resultado.folio || ''}
+ID del Análisis:     ${resultado.idAnalisis || ''}
 
 VEREDICTO DEL SISTEMA:
 ----------------------
-${resultado.motivo}
+${resultado.motivo || ''}
 
-Nivel de Riesgo:     ${resultado.nivelRiesgo.toUpperCase()}
+Nivel de Riesgo:     ${(resultado.nivelRiesgo || '').toUpperCase()}
 
 COINCIDENCIAS ENCONTRADAS:
 --------------------------
-${resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n')}
+${(resultado.coincidencias || []).map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n')}
 
 ACCIONES RECOMENDADAS POR EL SISTEMA:
 --------------------------------------
-${resultado.accionesRecomendadas.map((a, i) => `${i+1}. ${a}`).join('\n')}
+${(resultado.accionesRecomendadas || []).map((a, i) => `${i + 1}. ${a}`).join('\n')}
 
 OBSERVACIONES REGISTRADAS:
 --------------------------
-${incidencia.notas}
+${incidencia.notas || ''}
 
 TEXTO EXTRAÍDO DEL MANIFIESTO (PRIMERAS 500 CARACTERES):
 --------------------------------------------------------
-${resultado.textoOriginal.substring(0, 500)}...
+${(resultado.textoOriginal || '').substring(0, 500)}...
 
 ================================================================
 SISTEMA DE VALIDACIÓN DE MANIFIESTO DE RESIDUOS PELIGROSOS
@@ -610,13 +712,11 @@ Versión 2.0 | Análisis automatizado
 // ============================================
 // FUNCIONES AUXILIARES
 // ============================================
-
 function descargarReporteCompleto() {
     if (!ultimoResultado) {
         alert('⚠️ No hay resultados para descargar.');
         return;
     }
-    
     const contenido = generarReporteCompleto(ultimoResultado);
     descargarArchivo(contenido, `reporte_manifiesto_${ultimoResultado.idAnalisis}.txt`, 'text/plain');
     console.log('📥 Reporte completo descargado');
@@ -647,15 +747,15 @@ ${resultado.motivo}
 
 COINCIDENCIAS ENCONTRADAS:
 --------------------------
-${resultado.coincidencias.length > 0 ? 
-    resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n') : 
-    'No se encontraron coincidencias en listas reguladas.'}
+${resultado.coincidencias.length > 0 ?
+        resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n') :
+        'No se encontraron coincidencias en listas reguladas.'}
 
 ACCIONES RECOMENDADAS:
 ----------------------
-${resultado.accionesRecomendadas.length > 0 ? 
-    resultado.accionesRecomendadas.map((a, i) => `${i+1}. ${a}`).join('\n') : 
-    'Ninguna acción requerida.'}
+${resultado.accionesRecomendadas.length > 0 ?
+        resultado.accionesRecomendadas.map((a, i) => `${i + 1}. ${a}`).join('\n') :
+        'Ninguna acción requerida.'}
 
 LISTA MAESTRA CONSULTADA:
 -------------------------
@@ -687,35 +787,38 @@ function descargarArchivo(contenido, nombre, tipo) {
 
 function reiniciarEscaneo() {
     console.log('🔄 Reiniciando escaneo...');
-    
-    // Resetear variables
     currentImage = null;
     ultimoResultado = null;
-    
-    // Resetear interfaz
-    document.getElementById('imagePreview').innerHTML = `
+
+    const imagePreview = document.getElementById('imagePreview');
+    if (imagePreview) imagePreview.innerHTML = `
         <p><i class="bi bi-image" style="font-size: 3rem; color: #ccc;"></i></p>
         <p>No hay imagen seleccionada</p>
     `;
-    
-    document.getElementById('processBtn').disabled = true;
-    document.querySelector('.processing-card').style.display = 'none';
-    document.querySelector('.results-card').style.display = 'none';
-    document.querySelector('.card:first-of-type').style.display = 'block';
-    
-    // Resetear formulario de incidencia
-    document.getElementById('incidenceNotes').value = '';
-    document.getElementById('assignedTo').value = '';
-    document.querySelector('.incidence-form').style.display = 'block';
-    document.getElementById('incidenceConfirmation').style.display = 'none';
-    document.getElementById('incidenceSection').style.display = 'none';
-    
-    // Cerrar cámara si está activa
+
+    const processBtn = document.getElementById('processBtn');
+    if (processBtn) processBtn.disabled = true;
+
+    const processingCard = document.querySelector('.processing-card');
+    if (processingCard) processingCard.style.display = 'none';
+    const resultsCard = document.querySelector('.results-card');
+    if (resultsCard) resultsCard.style.display = 'none';
+    const firstCard = document.querySelector('.card:first-of-type');
+    if (firstCard) firstCard.style.display = 'block';
+
+    const incidenceNotes = document.getElementById('incidenceNotes');
+    const assignedTo = document.getElementById('assignedTo');
+    if (incidenceNotes) incidenceNotes.value = '';
+    if (assignedTo) assignedTo.value = '';
+    const incidenceForm = document.querySelector('.incidence-form');
+    if (incidenceForm) incidenceForm.style.display = 'block';
+    const incidenceConfirmation = document.getElementById('incidenceConfirmation');
+    if (incidenceConfirmation) incidenceConfirmation.style.display = 'none';
+    const incidenceSection = document.getElementById('incidenceSection');
+    if (incidenceSection) incidenceSection.style.display = 'none';
+
     closeCamera();
-    
-    // Desplazar al inicio
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    
     console.log('✅ Escaneo reiniciado correctamente');
 }
 
@@ -731,7 +834,8 @@ function mostrarError(mensaje) {
                 <i class="bi bi-arrow-repeat"></i> Intentar Nuevamente
             </button>
         `;
-        document.querySelector('.results-card').style.display = 'block';
+        const resultsCard = document.querySelector('.results-card');
+        if (resultsCard) resultsCard.style.display = 'block';
     } else {
         alert(mensaje);
     }
@@ -744,45 +848,53 @@ function mostrarErrorSistema(mensaje) {
 // ============================================
 // CONFIGURACIÓN DE EVENTOS
 // ============================================
-
 function setupEventListeners() {
     console.log('🔧 Configurando eventos...');
-    
-    // Eventos de captura de imagen
-    document.getElementById('cameraBtn').addEventListener('click', openCamera);
-    document.getElementById('uploadBtn').addEventListener('click', () => {
-        console.log('📤 Botón subir clickeado');
-        document.getElementById('fileInput').click();
-    });
-    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
-    document.getElementById('captureBtn').addEventListener('click', captureFromCamera);
-    document.getElementById('cancelCameraBtn').addEventListener('click', closeCamera);
-    
-    // Evento principal de análisis
-    document.getElementById('processBtn').addEventListener('click', iniciarAnalisis);
-    
-    // Eventos de resultados
-    document.getElementById('newScanBtn').addEventListener('click', reiniciarEscaneo);
-    document.getElementById('downloadReportBtn').addEventListener('click', descargarReporteCompleto);
-    
-    // Eventos de incidencias
-    document.getElementById('registerIncidenceBtn').addEventListener('click', registrarIncidencia);
-    document.getElementById('skipIncidenceBtn').addEventListener('click', omitirIncidencia);
-    document.getElementById('downloadIncidenceReport').addEventListener('click', descargarReporteIncidencia);
-    document.getElementById('newScanAfterIncidence').addEventListener('click', reiniciarEscaneo);
+    const cameraBtn = document.getElementById('cameraBtn');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileInput = document.getElementById('fileInput');
+    const captureBtn = document.getElementById('captureBtn');
+    const cancelCameraBtn = document.getElementById('cancelCameraBtn');
+    const processBtn = document.getElementById('processBtn');
+    const newScanBtn = document.getElementById('newScanBtn');
+    const downloadReportBtn = document.getElementById('downloadReportBtn');
+    const registerIncidenceBtn = document.getElementById('registerIncidenceBtn');
+    const skipIncidenceBtn = document.getElementById('skipIncidenceBtn');
+    const downloadIncidenceReport = document.getElementById('downloadIncidenceReport');
+    const newScanAfterIncidence = document.getElementById('newScanAfterIncidence');
+
+    if (cameraBtn) cameraBtn.addEventListener('click', openCamera);
+    if (uploadBtn) uploadBtn.addEventListener('click', () => { console.log('📤 Botón subir clickeado'); if (fileInput) fileInput.click(); });
+    if (fileInput) fileInput.addEventListener('change', handleFileSelect);
+    if (captureBtn) captureBtn.addEventListener('click', captureFromCamera);
+    if (cancelCameraBtn) cancelCameraBtn.addEventListener('click', closeCamera);
+    if (processBtn) processBtn.addEventListener('click', iniciarAnalisis);
+    if (newScanBtn) newScanBtn.addEventListener('click', reiniciarEscaneo);
+    if (downloadReportBtn) downloadReportBtn.addEventListener('click', descargarReporteCompleto);
+    if (registerIncidenceBtn) registerIncidenceBtn.addEventListener('click', registrarIncidencia);
+    if (skipIncidenceBtn) skipIncidenceBtn.addEventListener('click', omitirIncidencia);
+    if (downloadIncidenceReport) downloadIncidenceReport.addEventListener('click', descargarReporteIncidencia);
+    if (newScanAfterIncidence) newScanAfterIncidence.addEventListener('click', reiniciarEscaneo);
 }
 
 // ============================================
 // INICIALIZACIÓN DE TESSERACT
 // ============================================
-
 async function inicializarTesseract() {
     try {
         console.log('🔄 Inicializando Tesseract.js...');
-        tesseractWorker = await Tesseract.createWorker();
+        if (typeof Tesseract === 'undefined') {
+            throw new Error('Tesseract.js no encontrado en el entorno.');
+        }
+        tesseractWorker = await Tesseract.createWorker({
+            logger: m => {
+                // opcional: mostrar progreso durante inicialización global
+                // console.log('Tesseract global:', m);
+            }
+        });
         await tesseractWorker.loadLanguage('spa');
         await tesseractWorker.initialize('spa');
-        console.log('✅ Tesseract.js inicializado correctamente para español');
+        console.log('✅ Tesseract.js inicializado correctamente para español (worker global)');
     } catch (error) {
         console.error('❌ Error al inicializar Tesseract:', error);
         mostrarErrorSistema('No se pudo inicializar el sistema de OCR.');
@@ -792,51 +904,45 @@ async function inicializarTesseract() {
 // ============================================
 // INICIALIZACIÓN DE LA APLICACIÓN
 // ============================================
-
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     console.log('✅ Sistema de Validación de Manifiestos - Inicializado');
     console.log('📋 Lista maestra cargada:', LISTA_MAESTRA.length, 'generadores configurados');
-    
-    // Verificar si Tesseract está disponible
+
     if (typeof Tesseract === 'undefined') {
         console.error('❌ Tesseract.js no se cargó correctamente');
         mostrarErrorSistema('La biblioteca de OCR no se cargó. Por favor, recarga la página.');
         return;
     }
-    
+
     setupEventListeners();
     inicializarTesseract();
+
+    // Cargar historial de incidencias desde localStorage al iniciar
+    try {
+        const historialGuardado = localStorage.getItem('historialIncidencias');
+        if (historialGuardado) {
+            historialIncidencias = JSON.parse(historialGuardado);
+            console.log(`📚 Historial cargado: ${historialIncidencias.length} incidencias previas`);
+        }
+    } catch (e) {
+        console.warn('No se pudo cargar historial de incidencias:', e);
+    }
 });
 
 // ============================================
 // MANEJO DE CIERRE Y LIMPIEZA
 // ============================================
-
-window.addEventListener('beforeunload', function() {
+window.addEventListener('beforeunload', function () {
     console.log('🛑 Limpiando recursos antes de cerrar...');
-    
-    // Terminar worker de Tesseract si existe
-    if (tesseractWorker) {
-        tesseractWorker.terminate();
-    }
-    
-    // Detener cámara si está activa
+    try {
+        if (tesseractWorker && typeof tesseractWorker.terminate === 'function') {
+            tesseractWorker.terminate();
+        }
+    } catch (e) { /* ignore */ }
+
     if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
     }
 });
 
-// Cargar historial de incidencias desde localStorage al iniciar
-try {
-    const historialGuardado = localStorage.getItem('historialIncidencias');
-    if (historialGuardado) {
-        historialIncidencias = JSON.parse(historialGuardado);
-        console.log(`📚 Historial cargado: ${historialIncidencias.length} incidencias previas`);
-    }
-} catch (e) {
-    console.warn('No se pudo cargar historial de incidencias:', e);
-}
-
-console.log('🎯 Sistema listo para validar manifiestos');        
-}      
-}  
+console.log('🎯 Sistema listo para validar manifiestos');
