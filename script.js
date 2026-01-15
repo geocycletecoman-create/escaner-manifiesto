@@ -47,6 +47,20 @@ let ultimoResultado = null;
 let historialIncidencias = [];
 
 // ============================================
+// UTIL: NORMALIZACIÓN PARA COMPARAR (quita acentos, puntuación, uppercase)
+// ============================================
+function normalizeForCompare(s) {
+    if (!s) return '';
+    // Normalizar Unicode y quitar diacríticos
+    let r = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Reemplazar caracteres no alfanuméricos por espacio
+    r = r.replace(/[^A-Za-z0-9\s]/g, ' ');
+    // Multiples espacios -> uno, trim y uppercase
+    r = r.replace(/\s+/g, ' ').trim().toUpperCase();
+    return r;
+}
+
+// ============================================
 // FUNCIONES DE CAPTURA DE IMAGEN (CÁMARA/ARCHIVO)
 // ============================================
 async function openCamera() {
@@ -175,7 +189,6 @@ function closeCamera() {
 // ============================================
 // FUNCIÓN PRINCIPAL DE ANÁLISIS
 // ============================================
-
 async function iniciarAnalisis() {
     console.log('🚀 Iniciando análisis de manifiesto...');
     if (!currentImage) {
@@ -198,17 +211,17 @@ async function iniciarAnalisis() {
     if (progressBar) progressBar.style.width = '25%';
 
     try {
-        // 1. EJECUTAR OCR
-        const textoCompleto = await ejecutarOCR(currentImage);
+        // 1. EJECUTAR OCR (devuelve el objeto completo de Tesseract)
+        const ocrResult = await ejecutarOCR(currentImage);
         if (progressBar) progressBar.style.width = '50%';
         if (progressText) progressText.textContent = 'Analizando datos extraídos...';
 
-        // 2. EXTRAER DATOS CLAVE DEL MANIFIESTO
-        const datosExtraidos = extraerDatosManifiesto(textoCompleto);
+        // 2. EXTRAER DATOS CLAVE DEL MANIFIESTO (usa numeración 4 y 5)
+        const datosExtraidos = extraerDatosManifiesto(ocrResult);
         if (progressBar) progressBar.style.width = '75%';
         if (progressText) progressText.textContent = 'Verificando contra lista maestra...';
 
-        // 3. VERIFICAR CONTRA LISTA MAESTRA
+        // 3. VERIFICAR CONTRA LISTA MAESTRA (usa comparación tolerante)
         const resultadoVerificacion = verificarContraListaMaestra(
             datosExtraidos.razonSocial,
             datosExtraidos.descripcionResiduo
@@ -220,7 +233,7 @@ async function iniciarAnalisis() {
         ultimoResultado = {
             ...datosExtraidos,
             ...resultadoVerificacion,
-            textoOriginal: textoCompleto,
+            textoOriginal: (ocrResult && ocrResult.data && ocrResult.data.text) ? ocrResult.data.text : (typeof ocrResult === 'string' ? ocrResult : ''),
             fechaAnalisis: new Date().toISOString(),
             idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
         };
@@ -247,9 +260,8 @@ async function iniciarAnalisis() {
 }
 
 // ============================================
-// FUNCIONES DE PROCESAMIENTO / OCR
+// FUNCIÓN OCR (devuelve objeto completo de Tesseract)
 // ============================================
-
 async function ejecutarOCR(imagen) {
     console.log('🔄 [OCR] Iniciando proceso...');
     if (!imagen) throw new Error('No hay imagen para procesar');
@@ -273,7 +285,7 @@ async function ejecutarOCR(imagen) {
             const { createWorker } = Tesseract;
             workerLocal = await createWorker({
                 logger: m => {
-                    console.log('📊 Progreso OCR (temporal):', m);
+                    console.log('📊 Progreso OCR (temp):', m);
                     if (m.status === 'recognizing text') {
                         if (progressText) progressText.textContent = `Procesando: ${Math.round(m.progress * 100)}%`;
                         if (progressBar) progressBar.style.width = `${10 + (m.progress * 60)}%`;
@@ -282,25 +294,26 @@ async function ejecutarOCR(imagen) {
             });
             await workerLocal.loadLanguage('spa');
             await workerLocal.initialize('spa');
+            // Opcional: ajustar psm para formularios (puedes probar '6' o '4')
+            try { await workerLocal.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) { /* no crítico */ }
         }
 
         if (progressBar) progressBar.style.width = '70%';
         if (progressText) progressText.textContent = 'Extrayendo texto...';
 
-        // Si imagen es File/Blob, pasar directamente; Tesseract puede aceptar URL o blob
-        const { data: { text } } = await workerLocal.recognize(imagen);
+        // Ejecutar reconocimiento - devolvemos el result completo para análisis por líneas
+        const result = await workerLocal.recognize(imagen);
 
         if (progressBar) progressBar.style.width = '100%';
         if (progressText) progressText.textContent = '¡Texto extraído!';
 
-        // Si creamos worker local temporal, terminarlo para liberar recursos
+        // Si creamos worker local temporal, terminarlo (si no usamos el global)
         if (!useGlobal && workerLocal && typeof workerLocal.terminate === 'function') {
             await workerLocal.terminate();
         }
 
         console.log('✅ [OCR] Proceso completado exitosamente');
-        console.log('📝 Texto extraído (primeros 200 caracteres):', text ? text.substring(0, 200) : '');
-        return text || '';
+        return result; // objeto con result.data.text, result.data.lines, result.data.words, etc.
 
     } catch (error) {
         console.error('❌ [OCR] Error detallado:', error);
@@ -311,10 +324,28 @@ async function ejecutarOCR(imagen) {
 }
 
 // ============================================
-// FUNCIONES DE EXTRACCIÓN Y VERIFICACIÓN
+// EXTRAER DATOS (busca explícitamente campos 4 y 5)
 // ============================================
+function extraerDatosManifiesto(ocrResult) {
+    // ocrResult puede ser el objeto devuelto por Tesseract o un string
+    let fullText = '';
+    let lines = [];
 
-function extraerDatosManifiesto(texto) {
+    if (ocrResult && typeof ocrResult === 'object' && ocrResult.data) {
+        fullText = ocrResult.data.text || '';
+        // data.lines puede ser array de objetos con .text
+        if (Array.isArray(ocrResult.data.lines)) {
+            lines = ocrResult.data.lines.map(l => (l.text || '').trim()).filter(Boolean);
+        } else {
+            lines = fullText.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+        }
+    } else if (typeof ocrResult === 'string') {
+        fullText = ocrResult;
+        lines = fullText.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+    } else {
+        return { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', fechaManifiesto: 'Desconocido', folio: 'Desconocido' };
+    }
+
     const resultado = {
         razonSocial: 'Desconocido',
         descripcionResiduo: 'Desconocido',
@@ -322,55 +353,92 @@ function extraerDatosManifiesto(texto) {
         folio: 'Desconocido'
     };
 
-    if (!texto || typeof texto !== 'string') return resultado;
+    function findNumberedField(num, labelKeywords = []) {
+        const reNum = new RegExp(`^\\s*${num}\\s*[\\.\\-\\)\\:]?\\s*(.*)`, 'i');
+        const reAnyNumStart = /^\s*\d+\s*[\.\-\)\:]/;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const m = line.match(reNum);
+            if (m) {
+                let content = (m[1] || '').trim();
+                const looksLikeLabelOnly = !content || labelKeywords.some(k => new RegExp(k, 'i').test(content)) || content.length < 3;
+                if (looksLikeLabelOnly) {
+                    const parts = [];
+                    let j = i + 1;
+                    while (j < lines.length && !reAnyNumStart.test(lines[j]) && parts.length < 4) {
+                        parts.push(lines[j]);
+                        j++;
+                    }
+                    content = (parts.join(' ')).trim() || content;
+                }
+                return content.replace(/^[\:\-\s]+/, '').trim();
+            }
+            // búsqueda por etiqueta textual en la misma línea
+            for (const kw of labelKeywords) {
+                if (new RegExp(kw, 'i').test(line)) {
+                    const after = line.split(new RegExp(kw, 'i'))[1] || '';
+                    let content = after.replace(/^[\:\-\s]+/, '').trim();
+                    if (!content || content.length < 3) {
+                        const parts = [];
+                        let j = i + 1;
+                        while (j < lines.length && !reAnyNumStart.test(lines[j]) && parts.length < 4) {
+                            parts.push(lines[j]);
+                            j++;
+                        }
+                        content = (parts.join(' ')).trim() || content;
+                    }
+                    return content;
+                }
+            }
+        }
+        return null;
+    }
 
-    const textoNorm = texto.replace(/\t/g, ' ');
-    const lines = textoNorm.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const razon = findNumberedField(4, ['RAZON SOCIAL', 'RAZÓN SOCIAL', 'RAZON SOCIAL DE LA EMPRESA']);
+    const descr = findNumberedField(5, ['DESCRIPCION', 'DESCRIPCIÓN', 'DESCRIPCION \\(Nombre del residuo', 'DESCRIPCION \\(Nombre']);
 
-    // Buscar folio
+    if (razon && razon.length > 0) resultado.razonSocial = razon;
+    if (descr && descr.length > 0) resultado.descripcionResiduo = descr;
+
+    // Fallbacks por regex en texto completo
+    if ((!razon || razon.length === 0) && /raz[oó]n social/i.test(fullText)) {
+        const m = fullText.match(/raz[oó]n social(?: de la empresa generadora)?[:\-\s]*([^\n]{3,200})/i);
+        if (m && m[1]) resultado.razonSocial = m[1].trim();
+    }
+    if ((!descr || descr.length === 0) && /descripci[oó]n/i.test(fullText)) {
+        const m = fullText.match(/descripci[oó]n(?:.*?residuo)?[:\-\s]*([^\n]{3,500})/i);
+        if (m && m[1]) resultado.descripcionResiduo = m[1].trim();
+    }
+
+    // folio y fecha
     const folioRegexes = [
         /\bFOLIO[:\s\-]*([A-Z0-9\-]{3,})\b/i,
         /\bNo\.?\s*[:\s\-]*([A-Z0-9\-]{3,})\b/i,
         /\bFolio[:\s\-]*([^\s]+)/i
     ];
     for (const rx of folioRegexes) {
-        const m = texto.match(rx);
+        const m = fullText.match(rx);
         if (m) {
-            resultado.folio = m[1].trim();
+            resultado.folio = (m[1] || '').trim();
             break;
         }
     }
-
-    // Buscar fecha
-    const fechaMatch = texto.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) ||
-        texto.match(/(\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b)/);
+    const fechaMatch = fullText.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) || fullText.match(/(\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b)/);
     if (fechaMatch) resultado.fechaManifiesto = fechaMatch[1];
 
-    // Heurística para razón social
-    for (let i = 0; i < Math.min(lines.length, 12); i++) {
-        const ln = lines[i];
-        const uppercaseRatio = (ln.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length) / Math.max(1, ln.length);
-        if (ln.length > 6 && (/[A-ZÁÉÍÓÚÑ]/.test(ln) && uppercaseRatio > 0.3)) {
-            resultado.razonSocial = ln;
-            break;
-        }
-    }
+    // limpieza final
+    resultado.razonSocial = resultado.razonSocial.replace(/^[\d\.\-\)\:\s]+/, '').replace(/[:\-]$/,'').trim();
+    resultado.descripcionResiduo = resultado.descripcionResiduo.replace(/^[\d\.\-\)\:\s]+/, '').replace(/[:\-]$/,'').trim();
 
-    // Descripción de residuo
-    const residuoRx = /(RESIDUO(?:S)?[:\s\-]+(.+))/i;
-    const descrRx = /(DESCRIPCI[oó]N(?: DEL)? RESIDUO[:\s\-]+(.+))/i;
-    const tipoRx = /(TIPO DE RESIDUO[:\s\-]+(.+))/i;
-    let m = texto.match(descrRx) || texto.match(residuoRx) || texto.match(tipoRx);
-    if (m) {
-        resultado.descripcionResiduo = (m[2] || m[1]).trim();
-    } else {
-        const candidate = lines.find(l => /residuo|residuos|basura|residuo peligroso|infectante|inflamable|reactivo|residuo industrial/i.test(l));
-        if (candidate) resultado.descripcionResiduo = candidate;
-    }
+    console.log('DEBUG extraerDatosManifiesto -> razonSocial:', resultado.razonSocial);
+    console.log('DEBUG extraerDatosManifiesto -> descripcionResiduo:', resultado.descripcionResiduo);
 
     return resultado;
 }
 
+// ============================================
+// VERIFICAR CONTRA LISTA MAESTRA (comparación tolerante)
+// ============================================
 function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     const resultado = {
         esAceptable: true,
@@ -380,20 +448,25 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
         accionesRecomendadas: []
     };
 
-    const razonLower = (razonSocial || '').toLowerCase();
-    const residuoLower = (descripcionResiduo || '').toLowerCase();
+    const genTargetNorm = normalizeForCompare(razonSocial);
+    const resTargetNorm = normalizeForCompare(descripcionResiduo);
 
+    // función auxiliar para marcar coincidencia
+    function pushCoincidence(tipo, valorOriginal, estado, motivo) {
+        resultado.coincidencias.push({
+            tipo,
+            valor: valorOriginal,
+            estado,
+            motivo
+        });
+    }
+
+    // 1) buscar coincidencias por generador y residuos asociados
     for (const item of LISTA_MAESTRA) {
-        const genLower = (item.generador || '').toLowerCase();
-
-        if (genLower && (razonLower.includes(genLower) || genLower === razonLower)) {
-            resultado.coincidencias.push({
-                tipo: 'generador',
-                valor: item.generador,
-                estado: item.estado,
-                motivo: item.motivo
-            });
-
+        const genNorm = normalizeForCompare(item.generador || '');
+        // coincidencia por generador (tolerante)
+        if (genNorm && (genTargetNorm.includes(genNorm) || genNorm.includes(genTargetNorm) || genNorm === genTargetNorm)) {
+            pushCoincidence('generador', item.generador, item.estado, item.motivo);
             if (item.estado && item.estado.includes('rechaz')) {
                 resultado.esAceptable = false;
                 resultado.motivo = `❌ RECHAZADO: Generador identificado en lista maestra (${item.generador})`;
@@ -407,17 +480,14 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
             }
         }
 
+        // coincidencia por residuo específico (tolerante)
         if (Array.isArray(item.residuos)) {
             for (const res of item.residuos) {
-                const resLower = (res || '').toLowerCase();
-                if (resLower && (residuoLower.includes(resLower) || resLower === residuoLower)) {
-                    resultado.coincidencias.push({
-                        tipo: 'residuo_especifico',
-                        valor: res,
-                        estado: item.estado,
-                        motivo: item.motivo
-                    });
-
+                const resNorm = normalizeForCompare(res || '');
+                if (!resNorm) continue;
+                if ((resTargetNorm && (resTargetNorm.includes(resNorm) || resNorm.includes(resTargetNorm))) ||
+                    (genTargetNorm && (genTargetNorm.includes(resNorm) || resNorm.includes(genTargetNorm)))) {
+                    pushCoincidence('residuo_especifico', res, item.estado, item.motivo);
                     if (item.estado && item.estado.includes('rechaz')) {
                         resultado.esAceptable = false;
                         resultado.motivo = `❌ RECHAZADO: Residuo (${res}) no autorizado.`;
@@ -434,18 +504,13 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
         }
     }
 
+    // 2) palabras peligrosas (si aún aceptable)
     if (resultado.esAceptable) {
         for (const palabra of PALABRAS_PELIGROSAS) {
             if (!palabra) continue;
-            const p = palabra.toLowerCase();
-            if (residuoLower.includes(p) || razonLower.includes(p)) {
-                resultado.coincidencias.push({
-                    tipo: 'palabra_clave_peligrosa',
-                    valor: palabra,
-                    estado: 'revision_requerida',
-                    motivo: 'Contiene término de material peligroso'
-                });
-
+            const p = normalizeForCompare(palabra);
+            if ((resTargetNorm && resTargetNorm.includes(p)) || (genTargetNorm && genTargetNorm.includes(p))) {
+                pushCoincidence('palabra_clave_peligrosa', palabra, 'revision_requerida', 'Contiene término de material peligroso');
                 resultado.esAceptable = false;
                 resultado.motivo = `⚠️ REQUIERE REVISIÓN: Se detectó término peligroso: "${palabra}".`;
                 resultado.nivelRiesgo = 'medio';
@@ -459,6 +524,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
         }
     }
 
+    // 3) si no hay coincidencias
     if (resultado.coincidencias.length === 0) {
         resultado.motivo = '✅ Documento aceptado: Generador y residuo no encontrados en listas reguladas.';
         resultado.accionesRecomendadas = ['Archivar según procedimiento estándar.'];
@@ -474,7 +540,6 @@ function mostrarResultadosEnInterfaz(resultado) {
     console.log('🖥️ Mostrando resultados en interfaz...');
     if (!resultado) return;
 
-    // 1. Mostrar datos extraídos
     const setText = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = value || '';
@@ -484,7 +549,6 @@ function mostrarResultadosEnInterfaz(resultado) {
     setText('detectedDate', resultado.fechaManifiesto);
     setText('detectedFolio', resultado.folio);
 
-    // 2. Mostrar veredicto principal
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
     if (resultStatus) {
@@ -497,7 +561,6 @@ function mostrarResultadosEnInterfaz(resultado) {
         `;
     }
 
-    // 3. Mostrar detalles de verificación
     const verificationContent = document.getElementById('verificationContent');
     let detallesHTML = '';
 
@@ -554,7 +617,6 @@ function mostrarResultadosEnInterfaz(resultado) {
 
     if (verificationContent) verificationContent.innerHTML = detallesHTML;
 
-    // 4. Mostrar/ocultar sección de incidencias si es RECHAZADO
     const incidenceSection = document.getElementById('incidenceSection');
     const incidenceForm = document.querySelector('.incidence-form');
     const incidenceConfirmation = document.getElementById('incidenceConfirmation');
@@ -573,7 +635,6 @@ function mostrarResultadosEnInterfaz(resultado) {
         if (incidenceSection) incidenceSection.style.display = 'none';
     }
 
-    // 5. Desplazar suavemente a los resultados
     setTimeout(() => {
         const resultsCard = document.querySelector('.results-card');
         if (resultsCard) resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -583,7 +644,7 @@ function mostrarResultadosEnInterfaz(resultado) {
 }
 
 // ============================================
-// FUNCIONES DE GESTIÓN DE INCIDENCIAS
+// GESTIÓN DE INCIDENCIAS, REPORTES Y AUXILIARES (sin cambios importantes)
 // ============================================
 function registrarIncidencia() {
     console.log('📝 Registrando incidencia...');
@@ -709,9 +770,6 @@ Versión 2.0 | Análisis automatizado
 `;
 }
 
-// ============================================
-// FUNCIONES AUXILIARES
-// ============================================
 function descargarReporteCompleto() {
     if (!ultimoResultado) {
         alert('⚠️ No hay resultados para descargar.');
@@ -747,13 +805,13 @@ ${resultado.motivo}
 
 COINCIDENCIAS ENCONTRADAS:
 --------------------------
-${resultado.coincidencias.length > 0 ?
+${resultado.coincidencias && resultado.coincidencias.length > 0 ?
         resultado.coincidencias.map(c => `• ${c.tipo}: ${c.valor} (${c.estado})`).join('\n') :
         'No se encontraron coincidencias en listas reguladas.'}
 
 ACCIONES RECOMENDADAS:
 ----------------------
-${resultado.accionesRecomendadas.length > 0 ?
+${resultado.accionesRecomendadas && resultado.accionesRecomendadas.length > 0 ?
         resultado.accionesRecomendadas.map((a, i) => `${i + 1}. ${a}`).join('\n') :
         'Ninguna acción requerida.'}
 
@@ -887,13 +945,11 @@ async function inicializarTesseract() {
             throw new Error('Tesseract.js no encontrado en el entorno.');
         }
         tesseractWorker = await Tesseract.createWorker({
-            logger: m => {
-                // opcional: mostrar progreso durante inicialización global
-                // console.log('Tesseract global:', m);
-            }
+            logger: m => { /* opcional: mostrar progreso */ }
         });
         await tesseractWorker.loadLanguage('spa');
         await tesseractWorker.initialize('spa');
+        try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) { /* opcional */ }
         console.log('✅ Tesseract.js inicializado correctamente para español (worker global)');
     } catch (error) {
         console.error('❌ Error al inicializar Tesseract:', error);
