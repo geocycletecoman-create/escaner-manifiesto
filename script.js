@@ -310,16 +310,6 @@ async function ejecutarOCR(imagen) {
         throw new Error(mensajeError);
     }
 }
-    
-    // 4. SI NO HUBO NINGUNA COINCIDENCIA
-    if (resultado.coincidencias.length === 0) {
-        resultado.motivo = '✅ Documento aceptado: Generador y residuo no encontrados en listas reguladas.';
-        resultado.accionesRecomendadas = ['Archivar según procedimiento estándar.'];
-    }
-    
-    return resultado;
-}
-
 // ============================================
 // FUNCIONES DE INTERFAZ DE RESULTADOS
 // ============================================
