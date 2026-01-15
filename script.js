@@ -839,3 +839,4 @@ try {
 
 console.log('🎯 Sistema listo para validar manifiestos');        
 }      
+}  
