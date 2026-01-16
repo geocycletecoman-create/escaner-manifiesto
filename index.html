@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Escáner de Manifiestos - Clasificador Automático</title>
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
@@ -36,16 +36,25 @@
             background: white;
             padding: 4px;
             object-fit: contain;
+            transition: opacity 200ms ease, transform 160ms ease;
+        }
+
+        /* Placeholder visual: cuando no hay logo real se muestra un estilo más tenue */
+        #topRightLogo.placeholder {
+            opacity: 0.7;
+            filter: grayscale(30%);
+            transform: scale(1);
         }
 
         /* Controles para cambiar/eliminar logo */
         .logo-controls {
             position: absolute;
             top: 12px;
-            right: calc(12px + 120px); /* desplazar a la izquierda del logo */
+            right: calc(12px + 100px); /* desplazar a la izquierda del logo */
             display: flex;
             gap: 0.5rem;
             align-items: center;
+            transition: width 240ms ease;
         }
         .logo-btn {
             background: rgba(255,255,255,0.95);
@@ -58,7 +67,34 @@
             align-items: center;
             gap: 6px;
         }
+
         .logo-btn:active { transform: translateY(1px); }
+
+        /* Usamos .logo-text para ser más precisos: solo esos spans se ocultarán */
+        .logo-controls .logo-text {
+            display: inline-block;
+            white-space: nowrap;
+            overflow: hidden;
+            vertical-align: middle;
+            transition: opacity 200ms ease, width 200ms ease, margin 200ms ease, padding 200ms ease;
+            opacity: 1;
+            width: auto;
+        }
+
+        /* Estado cuando hay logo: el texto se oculta (opacidad 0 y ancho 0) */
+        .logo-controls.has-logo .logo-text {
+            opacity: 0;
+            width: 0;
+            margin: 0;
+            padding: 0;
+            pointer-events: none; /* evita foco por accidente */
+        }
+
+        /* Pequeño ajuste visual para que los iconos queden bien centrados cuando los textos están ocultos */
+        .logo-controls .bi {
+            font-size: 1.05rem;
+            line-height: 1;
+        }
 
         /* Responsive: en pantallas pequeñas movemos el logo al final del header y lo hacemos más pequeño */
         @media (max-width: 600px) {
@@ -84,20 +120,6 @@
         .container {
             padding-top: 0.5rem;
         }
-
-        /* Pequeños estilos para buttons y cards si no tienes style.css */
-        .btn { cursor:pointer; padding: 0.45rem 0.7rem; border-radius: 6px; border: 1px solid #2c6; background: #f5f5f5; }
-        .btn-primary { background: #0d6efd; color: white; border-color: #0d6efd; }
-        .btn-secondary { background: #6c757d; color: white; border-color: #6c757d; }
-        .btn-success { background: #198754; color: white; border-color: #198754; }
-        .btn-danger { background: #dc3545; color: white; border-color: #dc3545; }
-        .btn-outline { background: transparent; border: 1px solid #ccc; }
-        .card { border: 1px solid #e6e6e6; border-radius: 8px; margin: 1rem 0; padding: 0; background: white; }
-        .card-header { padding: 0.75rem 1rem; border-bottom: 1px solid #eee; background: #fafafa; }
-        .card-body { padding: 1rem; }
-        .subtitle { margin: 0; color: #555; }
-        .image-preview { text-align: center; padding: 1rem; border: 1px dashed #eee; border-radius: 6px; }
-        .preview-container { display: flex; gap: 1rem; align-items: flex-start; }
     </style>
 </head>
 <body>
@@ -105,25 +127,25 @@
         <header>
             <div class="title-block">
                 <h1><i class="bi bi-file-earmark-medical"></i> Validador de Manifiestos</h1>
-                <p class="subtitle">G E O C Y C L E   T E C O M A N</p>
+                <p class="subtitle">Escanea manifiestos y detecta automáticamente si son aceptables según tu lista maestra</p>
             </div>
 
             <!-- Controles para cargar/eliminar logo desde el ordenador -->
             <div class="logo-controls" aria-hidden="false">
                 <label for="logoInput" class="logo-btn" title="Cargar logo desde tu ordenador" role="button">
                     <i class="bi bi-upload"></i>
-                    <span>Cargar logo</span>
+                    <span class="logo-text">Cargar logo</span>
                 </label>
                 <button id="removeLogoBtn" class="logo-btn" title="Eliminar logo (volver al predeterminado)">
                     <i class="bi bi-trash"></i>
-                    <span>Eliminar</span>
+                    <span class="logo-text">Eliminar</span>
                 </button>
                 <!-- Input oculto para seleccionar archivo -->
-                <input id="logoInput" type="file" accept="image/*" style="display:none" aria-label="Seleccionar logo">
+                <input id="logoInput" type="file" accept="image/*" style="display:none">
             </div>
 
             <!-- Imagen en la esquina superior derecha.
-                 Si no hay logo cargado, se mostrará oculto. -->
+                 Si no hay logo cargado, se mostrará el placeholder incluido en el script. -->
             <img id="topRightLogo" src="" alt="Logo" style="display:none">
         </header>
 
@@ -144,13 +166,13 @@
                 </div>
 
                 <div class="preview-container">
-                    <div id="imagePreview" class="image-preview" style="flex:1;">
+                    <div id="imagePreview" class="image-preview">
                         <p><i class="bi bi-image" style="font-size: 3rem; color: #ccc;"></i></p>
                         <p>No hay imagen seleccionada</p>
                     </div>
                     <div id="cameraView" class="camera-view" style="display: none;">
-                        <video id="cameraStream" autoplay playsinline style="width: 280px; border-radius:6px;"></video>
-                        <div class="camera-controls" style="margin-top:0.5rem;">
+                        <video id="cameraStream" autoplay playsinline></video>
+                        <div class="camera-controls">
                             <button id="captureBtn" class="btn btn-success">
                                 <i class="bi bi-camera-fill"></i> Capturar
                             </button>
@@ -161,8 +183,8 @@
                     </div>
                 </div>
                 
-                <div class="process-button-container" style="margin-top: 0.75rem;">
-                    <button id="processBtn" class="btn btn-primary" disabled>
+                <div class="process-button-container">
+                    <button id="processBtn" class="btn btn-process" disabled>
                         <i class="bi bi-magic"></i> Analizar Manifiesto
                     </button>
                 </div>
@@ -176,10 +198,10 @@
             </div>
             <div class="card-body">
                 <div class="loading">
-                    <div class="spinner" style="width:36px;height:36px;border:4px solid #eee;border-top-color:#0d6efd;border-radius:50%;margin:0 auto 0.5rem;"></div>
+                    <div class="spinner"></div>
                     <p id="progressText">Iniciando análisis del manifiesto...</p>
-                    <div class="progress" style="height:10px; background:#eee; border-radius:6px; overflow:hidden; margin:0.5rem 0;">
-                        <div id="progressBar" class="progress-bar" style="width:0%; height:100%; background:#0d6efd;"></div>
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar"></div>
                     </div>
                     <p class="processing-detail">Extrayendo datos con OCR...</p>
                 </div>
@@ -199,7 +221,7 @@
                 </div>
                 
                 <!-- DATOS EXTRAÍDOS DEL MANIFIESTO -->
-                <div class="extracted-data" style="margin-top:0.5rem;">
+                <div class="extracted-data">
                     <h4><i class="bi bi-card-checklist"></i> Datos Identificados del Manifiesto</h4>
                     <div class="data-grid">
                         <div class="data-item">
@@ -222,7 +244,7 @@
                 </div>
                 
                 <!-- DETALLES DE LA VERIFICACIÓN -->
-                <div id="verificationDetails" class="verification-details" style="margin-top:0.75rem;">
+                <div id="verificationDetails" class="verification-details">
                     <h4><i class="bi bi-search"></i> Detalles de la Verificación</h4>
                     <div id="verificationContent">
                         <!-- Se llena dinámicamente -->
@@ -230,20 +252,20 @@
                 </div>
                 
                 <!-- SECCIÓN DE INCIDENCIA (SOLO SI ES RECHAZADO) -->
-                <div id="incidenceSection" class="incidence-section" style="display: none; margin-top:0.75rem;">
+                <div id="incidenceSection" class="incidence-section" style="display: none;">
                     <h4><i class="bi bi-exclamation-triangle"></i> Gestión de Incidencia</h4>
                     <p class="incidence-info">Este manifiesto ha sido <strong>rechazado</strong>. Por favor, registre la incidencia para seguimiento.</p>
                     
                     <div class="incidence-form">
                         <div class="form-group">
                             <label for="incidenceNotes">Observaciones de la Incidencia *</label>
-                            <textarea id="incidenceNotes" class="form-control" rows="3" placeholder="Describa los motivos del rechazo y cualquier observación relevante..." required style="width:100%;"></textarea>
+                            <textarea id="incidenceNotes" class="form-control" rows="3" placeholder="Describa los motivos del rechazo y cualquier observación relevante..." required></textarea>
                         </div>
                         <div class="form-group">
                             <label for="assignedTo">Asignar a (Responsable):</label>
-                            <input type="text" id="assignedTo" class="form-control" placeholder="Ej: Departamento Ambiental, Supervisor" style="width:100%;">
+                            <input type="text" id="assignedTo" class="form-control" placeholder="Ej: Departamento Ambiental, Supervisor">
                         </div>
-                        <div class="form-action-buttons" style="margin-top:0.5rem;">
+                        <div class="form-action-buttons">
                             <button id="registerIncidenceBtn" class="btn btn-danger">
                                 <i class="bi bi-flag-fill"></i> Registrar Incidencia
                             </button>
@@ -253,7 +275,7 @@
                         </div>
                     </div>
                     
-                    <div id="incidenceConfirmation" class="incidence-confirmation" style="display: none; margin-top:0.5rem;">
+                    <div id="incidenceConfirmation" class="incidence-confirmation" style="display: none;">
                         <div class="confirmation-content">
                             <i class="bi bi-check-circle-fill success-icon"></i>
                             <h5>Incidencia Registrada Exitosamente</h5>
@@ -271,7 +293,7 @@
                 </div>
                 
                 <!-- ACCIONES FINALES -->
-                <div class="final-actions" style="margin-top:0.75rem;">
+                <div class="final-actions">
                     <button id="newScanBtn" class="btn btn-primary">
                         <i class="bi bi-arrow-repeat"></i> Nuevo Escaneo
                     </button>
@@ -283,7 +305,7 @@
         </div>
 
         <!-- INFORMACIÓN DEL SISTEMA -->
-        <div class="instructions" style="margin-top:0.75rem;">
+        <div class="instructions">
             <h4><i class="bi bi-info-circle"></i> ¿Cómo funciona el sistema?</h4>
             <ol>
                 <li><strong>Capture o suba</strong> una imagen del manifiesto de residuos</li>
@@ -296,7 +318,7 @@
             </div>
         </div>
 
-        <footer style="margin-top:1rem;">
+        <footer>
             <p>Sistema de Validación de Manifiestos v2.0 | 
                 <span id="versionInfo">Modo: Validación Automática</span>
             </p>
@@ -306,29 +328,51 @@
     <!-- Tesseract.js para OCR -->
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@v4.0.2/dist/tesseract.min.js'></script>
 
-    <!-- Script para gestionar la carga del logo desde el ordenador y persistir en localStorage -->
+    <!-- Script para gestionar la carga del logo desde el ordenador y persistir en localStorage (versión con placeholder) -->
     <script>
         (function () {
             const logoInput = document.getElementById('logoInput');
             const topRightLogo = document.getElementById('topRightLogo');
             const removeLogoBtn = document.getElementById('removeLogoBtn');
+            const logoControls = document.querySelector('.logo-controls');
             const STORAGE_KEY = 'topRightLogoDataUrl_v1';
-            const MAX_SIZE_MB = 4; // límite de tamaño recomendado
 
-            // Cargar logo desde localStorage si existe
+            // SVG simple usado como placeholder (se codifica en runtime)
+            const placeholderSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="96" viewBox="0 0 320 96"><rect width="100%" height="100%" rx="8" ry="8" fill="%23ffffff" stroke="%23e6e6e6"/><g transform="translate(16,12)"><rect x="0" y="0" width="80" height="72" rx="6" fill="%23f5f5f7" stroke="%23e0e0e0"/><text x="40" y="42" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="%23b0b0b0" text-anchor="middle">LOGO</text></g><text x="110" y="56" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="%23b0b0b0">Cargar tu logo aquí</text></svg>';
+            const PLACEHOLDER_DATA_URL = 'data:image/svg+xml;utf8,' + encodeURIComponent(placeholderSvg);
+
+            function setHasLogoClass(has) {
+                if (!logoControls) return;
+                if (has) logoControls.classList.add('has-logo');
+                else logoControls.classList.remove('has-logo');
+            }
+
+            function setPlaceholderClass(isPlaceholder) {
+                if (!topRightLogo) return;
+                if (isPlaceholder) topRightLogo.classList.add('placeholder');
+                else topRightLogo.classList.remove('placeholder');
+            }
+
+            // Cargar logo desde localStorage si existe; si no existe, usar placeholder
             function loadLogoFromStorage() {
                 try {
                     const dataUrl = localStorage.getItem(STORAGE_KEY);
                     if (dataUrl) {
                         topRightLogo.src = dataUrl;
-                        topRightLogo.style.display = 'block';
+                        setHasLogoClass(true);
+                        setPlaceholderClass(false);
                     } else {
-                        topRightLogo.src = '';
-                        topRightLogo.style.display = 'none';
+                        topRightLogo.src = PLACEHOLDER_DATA_URL;
+                        setHasLogoClass(false);
+                        setPlaceholderClass(true);
                     }
+                    topRightLogo.style.display = 'block';
                 } catch (e) {
-                    topRightLogo.src = '';
-                    topRightLogo.style.display = 'none';
+                    // Si localStorage falla, mostramos placeholder
+                    topRightLogo.src = PLACEHOLDER_DATA_URL;
+                    topRightLogo.style.display = 'block';
+                    setHasLogoClass(false);
+                    setPlaceholderClass(true);
                     console.warn('No se pudo acceder a localStorage:', e);
                 }
             }
@@ -344,8 +388,9 @@
                     logoInput.value = '';
                     return;
                 }
-                if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-                    alert('El archivo es demasiado grande. Tamaño máximo recomendado: ' + MAX_SIZE_MB + ' MB.');
+                const maxSizeMB = 4;
+                if (file.size > maxSizeMB * 1024 * 1024) {
+                    alert('El archivo es demasiado grande. Tamaño máximo recomendado: ' + maxSizeMB + ' MB.');
                     logoInput.value = '';
                     return;
                 }
@@ -353,9 +398,10 @@
                 const reader = new FileReader();
                 reader.onload = function (e) {
                     const dataUrl = e.target.result;
-                    // Mostrar el logo
                     topRightLogo.src = dataUrl;
                     topRightLogo.style.display = 'block';
+                    setHasLogoClass(true);
+                    setPlaceholderClass(false);
 
                     // Persistir en localStorage para que el logo permanezca entre recargas
                     try {
@@ -371,22 +417,25 @@
             removeLogoBtn.addEventListener('click', function () {
                 if (!confirm('¿Eliminar el logo actual? Esto lo quitará de la vista y no se restaurará automáticamente.')) return;
 
-                topRightLogo.src = '';
-                topRightLogo.style.display = 'none';
-                logoInput.value = '';
-
+                // Borrar storage y restaurar placeholder
                 try {
                     localStorage.removeItem(STORAGE_KEY);
                 } catch (e) {
                     console.warn('No se pudo eliminar logo de localStorage:', e);
                 }
+
+                topRightLogo.src = PLACEHOLDER_DATA_URL;
+                topRightLogo.style.display = 'block';
+                setHasLogoClass(false);
+                setPlaceholderClass(true);
+                logoInput.value = '';
             });
 
             // Inicializar al cargar la página
             loadLogoFromStorage();
 
-            // Si quieres que hacer click en el logo abra el selector:
-            topRightLogo.addEventListener('click', () => logoInput.click());
+            // Opcional: permitir cambiar logo haciendo clic en la imagen
+            // topRightLogo.addEventListener('click', () => logoInput.click());
         })();
     </script>
 
