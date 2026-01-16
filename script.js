@@ -187,31 +187,62 @@ async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
 }
 
 // ==================== DEFAULT RECTS (Prueba A) ====================
-// Estos son los rects solicitados en "Prueba A"
 const DEFAULT_RECTS = {
     razonRect: { x: 0.06, y: 0.215, w: 0.88, h: 0.06 }, // línea 4
     descrRect: { x: 0.05, y: 0.345, w: 0.60, h: 0.14 }  // bloque descripción (izquierda sólo)
 };
 
-// ==================== EXTRAER MEDIANTE CROPS (campos 4 y 5) ====================
+// ==================== EXTRAER MEDIANTE CROPS (mejorado) ====================
 async function extractFieldsByCrop(file) {
     const { razonRect, descrRect } = DEFAULT_RECTS;
+
     let razonText = '';
     let descrText = '';
     let fullResult = null;
 
+    // 1) OCR de la razon (psm single line)
     try {
-        razonText = await ocrCrop(file, razonRect, '7'); // single line
+        razonText = await ocrCrop(file, razonRect, '7');
     } catch (e) {
         console.warn('ocrCrop razon fallo:', e);
     }
 
+    // 2) OCR del header dentro del area de descripcion para detectar etiqueta
+    const headerFrac = 0.06;
+    const headerRect = {
+        x: descrRect.x,
+        y: descrRect.y,
+        w: descrRect.w,
+        h: Math.min(descrRect.h, headerFrac)
+    };
+
+    let headerText = '';
     try {
-        descrText = await ocrCrop(file, descrRect, '6'); // paragraph
+        headerText = await ocrCrop(file, headerRect, '6');
+    } catch (e) {
+        console.warn('ocrCrop header fallo:', e);
+        headerText = '';
+    }
+
+    const hasHeaderLabel = /DESCRIPCION|DESCRIPCIÓN|DESCRIPCION\s*\(Nombre/i.test(headerText || '');
+
+    let actualDescrRect = descrRect;
+    if (hasHeaderLabel) {
+        const newY = descrRect.y + headerRect.h;
+        const newH = Math.max(0.03, descrRect.h - headerRect.h);
+        actualDescrRect = { x: descrRect.x, y: newY, w: descrRect.w, h: newH };
+    } else {
+        actualDescrRect = { ...descrRect };
+    }
+
+    // 3) OCR en la región ajustada
+    try {
+        descrText = await ocrCrop(file, actualDescrRect, '6');
     } catch (e) {
         console.warn('ocrCrop descripcion fallo:', e);
     }
 
+    // 4) Fallback a OCR completo si hace falta
     if ((!razonText || razonText.length < 3) || (!descrText || descrText.length < 3)) {
         try {
             fullResult = await ejecutarOCR(file);
@@ -223,15 +254,45 @@ async function extractFieldsByCrop(file) {
         }
     }
 
-    razonText = (razonText || '').replace(/^\s*4[\.\-\)\:\s]*/i, '').replace(/RAZON SOCIAL.*?:?/i, '').trim();
-    descrText = (descrText || '').replace(/^\s*5[\.\-\)\:\s]*/i, '').replace(/DESCRIPCION.*?:?/i, '').trim();
+    // 5) Limpiar descripción: eliminar encabezados y numeraciones
+    function cleanDescription(raw) {
+        if (!raw) return '';
+        const lines = raw.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
 
-    console.log('DEBUG CROP -> RAZON:', razonText);
-    console.log('DEBUG CROP -> DESCRIPCION:', descrText);
+        const badHeaderRx = /CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO|DESCRIPCION|DESCRIPCIÓN/i;
+        const numLineRx = /^\s*\d+\s*[\.\-\)]/;
+        const shortNoiseRx = /^[\W_0-9]{1,6}$/;
+
+        const goodLines = [];
+        for (let i = 0; i < lines.length; i++) {
+            const ln = lines[i];
+            if (badHeaderRx.test(ln)) continue;
+            if (numLineRx.test(ln)) {
+                const after = ln.replace(/^\s*\d+\s*[\.\-\)]\s*/, '').trim();
+                if (after.length > 2) {
+                    goodLines.push(after);
+                }
+                continue;
+            }
+            if (shortNoiseRx.test(ln)) continue;
+            if (/N[úu]M|REGISTRO AMBIENTAL|MANIFIESTO|RAZON SOCIAL/i.test(ln)) continue;
+            goodLines.push(ln);
+            if (goodLines.length >= 3) break;
+        }
+        return goodLines.join(' ').replace(/^[\:\-\s]+|[\:\-\s]+$/g, '').trim();
+    }
+
+    const descripcionFinal = cleanDescription(descrText);
+    const razonFinal = (razonText || '').replace(/^\s*4[\.\-\)\:\s]*/i, '').replace(/RAZON SOCIAL.*?:?/i, '').trim();
+
+    console.log('DEBUG headerText:', headerText);
+    console.log('DEBUG raw descrText:', descrText);
+    console.log('DEBUG descripcionFinal:', descripcionFinal);
+    console.log('DEBUG razonText:', razonText);
 
     return {
-        razonSocial: razonText || 'Desconocido',
-        descripcionResiduo: descrText || 'Desconocido',
+        razonSocial: razonFinal || 'Desconocido',
+        descripcionResiduo: descripcionFinal || 'Desconocido',
         fechaManifiesto: (fullResult && fullResult.data && fullResult.data.text) ? (
             (fullResult.data.text.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) || [])[1] || ''
         ) : '',
@@ -315,7 +376,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     return resultado;
 }
 
-// ==================== FUNCIÓN PRINCIPAL: iniciarAnalisis (usa recorte fijo) ====================
+// ==================== FUNCIÓN PRINCIPAL: iniciarAnalisis ====================
 async function iniciarAnalisis() {
     if (!currentImage) { safeMostrarError('Sube o captura la imagen primero.'); return; }
 
@@ -342,7 +403,7 @@ async function iniciarAnalisis() {
         ultimoResultado = {
             ...datos,
             ...verif,
-            textoOriginal: '', // ya almacenado si se usó fallback
+            textoOriginal: '',
             fechaAnalisis: new Date().toISOString(),
             idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
         };
@@ -392,7 +453,7 @@ function mostrarResultadosEnInterfaz(resultado) {
     const date = resultado.fechaManifiesto || '';
     const folio = resultado.folio || '';
 
-    // Intentar varios selectores comunes - agrega aquí los IDs exactos de tu HTML si los conoces
+    // Intentar varios selectores comunes - añade IDs exactos si los conoces
     setField('detectedCompany', company);
     setField('#detectedCompany', company);
     setField('input[name="razonSocial"]', company);
@@ -413,7 +474,6 @@ function mostrarResultadosEnInterfaz(resultado) {
     setField('#detectedFolio', folio);
     setField('input[name="folio"]', folio);
 
-    // Actualizar panel de veredicto
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
     if (resultStatus) {
@@ -426,7 +486,6 @@ function mostrarResultadosEnInterfaz(resultado) {
         `;
     }
 
-    // verification details
     const verificationContent = document.getElementById('verificationContent');
     let detallesHTML = '';
     if (resultado.coincidencias && resultado.coincidencias.length > 0) {
@@ -461,7 +520,6 @@ function registrarIncidencia() {
     if (confirmationMessage) confirmationMessage.innerHTML = `Incidencia registrada: <strong>${incidenciaId}</strong>`;
     if (confirmationDiv) confirmationDiv.style.display = 'block';
 }
-
 function omitirIncidencia() { if (confirm('¿Seguro desea omitir?')) reiniciarEscaneo(); }
 function descargarReporteIncidencia() { if (historialIncidencias.length === 0) { alert('No hay incidencias.'); return; } const ultima = historialIncidencias[historialIncidencias.length - 1]; const contenido = generarReporteIncidencia(ultima); descargarArchivo(contenido, `incidencia_${ultima.id}.txt`, 'text/plain'); }
 function generarReporteIncidencia(incidencia) { const r = incidencia.resultadoAnalisis || {}; return `REPORTE INCIDENCIA\nID: ${incidencia.id}\nFecha: ${incidencia.fecha}\nGenerador: ${r.razonSocial || ''}\nResiduo: ${r.descripcionResiduo || ''}\nMotivo: ${r.motivo || ''}\nNotas:\n${incidencia.notas}\n`; }
