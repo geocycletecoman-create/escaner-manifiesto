@@ -27,13 +27,11 @@ function normalizeForCompare(s) {
     return r;
 }
 
-// Escape text before inserting into RegExp
 function escapeRegExp(str) {
     if (!str) return '';
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Safe mostrarError wrapper (fallback to alert)
 function safeMostrarError(mensaje) {
     if (typeof mostrarError === 'function') {
         try { mostrarError(mensaje); } catch (e) { console.error('mostrarError fallo:', e); alert(mensaje); }
@@ -148,160 +146,133 @@ async function ejecutarOCR(imagen) {
     }
 }
 
-// ==================== EXTRACCIÓN POR BOUNDING BOXES (campos 4 y 5) ====================
-function extractFieldsFromBBoxes(tesseractResult) {
-    const salida = { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', fechaManifiesto: '', folio: '' };
-    if (!tesseractResult || !tesseractResult.data) return salida;
-
-    const rawWords = Array.isArray(tesseractResult.data.words) && tesseractResult.data.words.length > 0
-        ? tesseractResult.data.words
-        : (Array.isArray(tesseractResult.data.symbols) ? tesseractResult.data.symbols : []);
-
-    const words = rawWords.map(w => {
-        const text = (w.text || w.word || '').replace(/\t/g, '').trim();
-        const bbox = w.bbox || {};
-        const x0 = bbox.x0 != null ? bbox.x0 : (w.x0 != null ? w.x0 : (w.x != null ? w.x : 0));
-        const y0 = bbox.y0 != null ? bbox.y0 : (w.y0 != null ? w.y0 : (w.y != null ? w.y : 0));
-        const x1 = bbox.x1 != null ? bbox.x1 : (w.x1 != null ? w.x1 : (w.x2 != null ? w.x2 : x0 + (w.width || 0)));
-        const y1 = bbox.y1 != null ? bbox.y1 : (w.y1 != null ? w.y1 : (w.y2 != null ? w.y2 : y0 + (w.height || 0)));
-        const cx = (x0 + x1) / 2;
-        const cy = (y0 + y1) / 2;
-        const h = Math.max(1, y1 - y0);
-        return { text, x0, y0, x1, y1, cx, cy, h };
-    }).filter(w => w.text && w.text.trim().length > 0);
-
-    if (words.length === 0) {
-        console.log('No se detectaron palabras con bbox. Usando fallback de texto completo.');
-        return extractFieldsFallback(tesseractResult.data.text || '');
-    }
-
-    // Agrupar por fila usando cy y altura media
-    const avgH = words.reduce((s, w) => s + w.h, 0) / words.length;
-    const rowThreshold = Math.max(8, avgH * 0.6);
-
-    words.sort((a, b) => a.cy - b.cy || a.x0 - b.x0);
-    const rows = [];
-    let currentRow = { y: words[0].cy, words: [words[0]] };
-    for (let i = 1; i < words.length; i++) {
-        const w = words[i];
-        if (Math.abs(w.cy - currentRow.y) <= rowThreshold) {
-            currentRow.words.push(w);
-            currentRow.y = (currentRow.y * (currentRow.words.length - 1) + w.cy) / currentRow.words.length;
-        } else {
-            rows.push(currentRow);
-            currentRow = { y: w.cy, words: [w] };
-        }
-    }
-    rows.push(currentRow);
-
-    const rowsText = rows.map(r => {
-        const ws = r.words.slice().sort((a, b) => a.x0 - b.x0);
-        const text = ws.map(w => w.text).join(' ');
-        return { y: r.y, words: ws, text };
+// ==================== HELPERS: convertir file a image y crop -> blob ====================
+function fileToImage(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+        img.src = url;
     });
-
-    console.log('DEBUG rowsText (primeras 30):', rowsText.slice(0, 30).map(r => r.text));
-
-    // Helpers: detectar fila por numeración o labelKeywords (escapando keywords)
-    function findRowIndexForNumber(num, keywords = []) {
-        const rxStart = new RegExp(`^\\s*${num}\\s*[\\.\\-\\)\\:]?\\b`, 'i');
-        for (let i = 0; i < rowsText.length; i++) {
-            const t = rowsText[i].text;
-            if (rxStart.test(t)) return i;
-            // respaldo: buscar keywords (escape)
-            for (const kw of keywords) {
-                const safeKw = escapeRegExp(kw);
-                if (new RegExp(`\\b${safeKw}\\b`, 'i').test(t)) return i;
-            }
-        }
-        // respaldo adicional: buscar palabra exactamente "4" o "5" entre filas
-        for (let i = 0; i < rows.length; i++) {
-            const found = rows[i].words.find(w => /^4$|^4[.\-)]$|^4[-\.]?$/.test(w.text));
-            if (found) return i;
-        }
-        return -1;
-    }
-
-    function extractRightContentFromRow(rowIndex, numberTokens = ['4', '5']) {
-        if (rowIndex < 0 || rowIndex >= rows.length) return null;
-        const row = rows[rowIndex];
-        // Buscar índice de la palabra numerada (4 o 5)
-        let labelWordIndex = row.words.findIndex(w => numberTokens.some(tok => new RegExp(`^${escapeRegExp(tok)}$|^${escapeRegExp(tok)}[.\\-)]$`, 'i').test(w.text)));
-        if (labelWordIndex === -1) {
-            labelWordIndex = row.words.findIndex(w => /^\d+\W/.test(w.text));
-        }
-        let contentWords = [];
-        if (labelWordIndex >= 0) {
-            const xLabelEnd = row.words[labelWordIndex].x1;
-            contentWords = row.words.filter(w => w.x0 > xLabelEnd + 2);
-            if (contentWords.length === 0) {
-                contentWords = row.words.slice(labelWordIndex + 1);
-            }
-        } else {
-            contentWords = row.words.slice(1);
-        }
-        return contentWords.map(w => w.text).join(' ').trim();
-    }
-
-    // Extraer RAZON (campo 4)
-    const razonIdx = findRowIndexForNumber(4, ['RAZON SOCIAL', 'RAZÓN SOCIAL', 'RAZON SOCIAL DE LA EMPRESA']);
-    let razon = '';
-    if (razonIdx !== -1) {
-        razon = extractRightContentFromRow(razonIdx, ['4']);
-        if (!razon || razon.length < 3) {
-            if (razonIdx + 1 < rowsText.length) razon = rowsText[razonIdx + 1].text;
-        }
-    }
-
-    // Extraer DESCRIPCION (campo 5) - multiline
-    const descrIdx = findRowIndexForNumber(5, ['DESCRIPCION', 'DESCRIPCIÓN', 'DESCRIPCION (Nombre']);
-    let descripcion = '';
-    if (descrIdx !== -1) {
-        const firstLine = extractRightContentFromRow(descrIdx, ['5']);
-        const parts = [];
-        if (firstLine && firstLine.length > 0) parts.push(firstLine);
-        const stopKeywords = ['CONTENEDOR', 'CAPACIDAD', 'CANTIDAD', 'UNIDAD', 'TIPO', 'INSTRUCCIONES'];
-        for (let j = descrIdx + 1; j < Math.min(rowsText.length, descrIdx + 6); j++) {
-            const t = rowsText[j].text;
-            if (/^\s*\d+\s*[\.:\-)]/.test(t)) break;
-            if (stopKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(t))) break;
-            parts.push(t);
-        }
-        descripcion = parts.join(' ').trim();
-    }
-
-    // Fallbacks si no encontrado
-    const fullText = (tesseractResult.data && tesseractResult.data.text) ? tesseractResult.data.text : '';
-    if ((!razon || razon.length < 2) && /raz[oó]n social/i.test(fullText)) {
-        const m = fullText.match(/raz[oó]n social(?: de la empresa generadora)?[:\-\s]*([^\n]{3,200})/i);
-        if (m && m[1]) razon = m[1].trim();
-    }
-    if ((!descripcion || descripcion.length < 2) && /descripci[oó]n/i.test(fullText)) {
-        const m = fullText.match(/descripci[oó]n(?:.*?residuo)?[:\-\s]*([^\n]{3,500})/i);
-        if (m && m[1]) descripcion = m[1].trim();
-    }
-
-    // fecha y folio
-    const fechaMatch = fullText.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) || fullText.match(/(\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b)/);
-    if (fechaMatch) salida.fechaManifiesto = fechaMatch[1];
-    const folioMatch = fullText.match(/\bFOLIO[:\s\-]*([A-Z0-9\-]{3,})\b/i) || fullText.match(/\bNo\.?\s*[:\s\-]*([A-Z0-9\-]{3,})\b/i);
-    if (folioMatch) salida.folio = folioMatch[1];
-
-    salida.razonSocial = (razon || salida.razonSocial).replace(/^[\d\.\-\)\:\s]+/, '').trim();
-    salida.descripcionResiduo = (descripcion || salida.descripcionResiduo).replace(/^[\d\.\-\)\:\s]+/, '').trim();
-
-    console.log('DEBUG filas detectadas (primeras 30):', rowsText.slice(0, 30).map(r => r.text));
-    console.log('DEBUG EXTRAIDO -> RAZON:', salida.razonSocial);
-    console.log('DEBUG EXTRAIDO -> DESCRIPCION:', salida.descripcionResiduo);
-
-    return salida;
 }
 
-// Fallback simple si boxes no disponibles
-function extractFieldsFallback(fullText) {
-    const salida = { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', fechaManifiesto: '', folio: '' };
-    if (!fullText) return salida;
+function cropImageToBlob(img, rect, quality = 0.95) {
+    const canvas = document.createElement('canvas');
+    const sx = Math.round(rect.x * img.naturalWidth);
+    const sy = Math.round(rect.y * img.naturalHeight);
+    const sw = Math.round(rect.w * img.naturalWidth);
+    const sh = Math.round(rect.h * img.naturalHeight);
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    return new Promise((resolve) => {
+        canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality);
+    });
+}
+
+// ==================== OCR SOBRE CROPS ====================
+async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
+    if (!fileOrBlob) throw new Error('No hay imagen para OCR por región');
+    if (!tesseractWorker) await inicializarTesseract();
+
+    const img = await fileToImage(fileOrBlob);
+    const cropBlob = await cropImageToBlob(img, rectPercent, 0.95);
+    if (!cropBlob) return '';
+
+    try {
+        // ajustar psm para esta tarea
+        try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: psm }); } catch (e) {}
+    } catch (e) {
+        // ignore
+    }
+
+    const result = await tesseractWorker.recognize(cropBlob);
+    return (result && result.data && result.data.text) ? result.data.text.trim() : '';
+}
+
+// ==================== EXTRAER MEDIANTE CROPS (campos 4 y 5) ====================
+// Aquí definimos las coordenadas relativas (x,y,w,h) en fracciones [0..1].
+// Estas coordenadas están calculadas a partir de tus imágenes de ejemplo y pueden requerir
+// pequeños ajustes si los escaneos varían (rotación/escala/márgenes).
+//
+// RECOMENDACIÓN: si tus manifiestos siempre tienen el mismo layout, estos rects funcionarán bien.
+// Si ves desplazamientos, házmelo saber y te doy valores afinados.
+//
+// Valores iniciales (ajustables):
+// - razonRect: recorta la franja donde normalmente aparece "4.- RAZON SOCIAL ..."
+// - descrRect: recorta el bloque donde aparece "5.- DESCRIPCION" y las líneas de texto a la izquierda de la tabla
+const DEFAULT_RECTS = {
+    // Ajusta estos valores si el recorte no queda centrado:
+    // x: distancia desde la izquierda (0..1), y: desde arriba, w: ancho, h: altura
+    // Estos valores son aproximados para la imagen de ejemplo; ajústalos en caso de variación.
+    razonRect: { x: 0.05, y: 0.20, w: 0.90, h: 0.07 },   // línea de razón social (4)
+    descrRect:  { x: 0.05, y: 0.30, w: 0.70, h: 0.20 }    // bloque de descripción (5) - NOTA: w < total para evitar tabla
+};
+
+async function extractFieldsByCrop(file) {
+    // Usa los rects por defecto; puedes exponer UI para ajustarlos si lo necesitas
+    const { razonRect, descrRect } = DEFAULT_RECTS;
+
+    // 1) OCR en razón social (psm=7 -> single line)
+    let razonText = '';
+    try {
+        razonText = await ocrCrop(file, razonRect, '7');
+    } catch (e) {
+        console.warn('ocrCrop razon fallo:', e);
+        razonText = '';
+    }
+
+    // 2) OCR en descripción (psm=6 -> auto para párrafos)
+    let descrText = '';
+    try {
+        descrText = await ocrCrop(file, descrRect, '6');
+    } catch (e) {
+        console.warn('ocrCrop descripcion fallo:', e);
+        descrText = '';
+    }
+
+    // 3) Si crop devolvió poco (ej. OCR falló), fallback: OCR completo y extraer por numeración
+    let fullResult = null;
+    if ((!razonText || razonText.length < 3) || (!descrText || descrText.length < 3)) {
+        try {
+            fullResult = await ejecutarOCR(file);
+            // usar fallback heurístico similar a antes
+            const fallback = extraerCamposNumeradosFromFull(fullResult);
+            if (!razonText || razonText.length < 3) razonText = fallback.razonSocial;
+            if (!descrText || descrText.length < 3) descrText = fallback.descripcionResiduo;
+        } catch (e) {
+            console.warn('OCR completo fallback fallo:', e);
+        }
+    }
+
+    // limpieza
+    razonText = (razonText || '').replace(/^\s*4[\.\-\)\:\s]*/i, '').replace(/RAZON SOCIAL.*?:?/i, '').trim();
+    descrText = (descrText || '').replace(/^\s*5[\.\-\)\:\s]*/i, '').replace(/DESCRIPCION.*?:?/i, '').trim();
+
+    console.log('DEBUG CROP -> RAZON:', razonText);
+    console.log('DEBUG CROP -> DESCRIPCION:', descrText);
+
+    return {
+        razonSocial: razonText || 'Desconocido',
+        descripcionResiduo: descrText || 'Desconocido',
+        fechaManifiesto: (fullResult && fullResult.data && fullResult.data.text) ? (
+            (fullResult.data.text.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/) || [])[1] || ''
+        ) : '',
+        folio: (fullResult && fullResult.data && fullResult.data.text) ? (
+            ((fullResult.data.text.match(/\bFOLIO[:\s\-]*([A-Z0-9\-]{3,})\b/i) || [])[1]) || ''
+        ) : ''
+    };
+}
+
+// Helper de fallback: extrae campos 4 y 5 del texto completo (similar a extraerCamposNumerados)
+function extraerCamposNumeradosFromFull(tesseractResult) {
+    const salida = { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido' };
+    if (!tesseractResult || !tesseractResult.data) return salida;
+    const fullText = tesseractResult.data.text || '';
     const lines = fullText.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+
     for (let i = 0; i < lines.length; i++) {
         const ln = lines[i];
         if (/^\s*4\s*[\.:\-)]/.test(ln) || /RAZON SOCIAL/i.test(ln)) {
@@ -310,16 +281,10 @@ function extractFieldsFallback(fullText) {
         }
         if (/^\s*5\s*[\.:\-)]/.test(ln) || /DESCRIPCION/i.test(ln)) {
             let rest = ln.replace(/^\s*5\s*[\.:\-)]/, '').replace(/DESCRIPCION.*[:\-]?/i, '').trim();
-            if (!rest) {
-                rest = (lines[i + 1] || '') + ' ' + (lines[i + 2] || '');
-            }
+            if (!rest) rest = (lines[i + 1] || '') + ' ' + (lines[i + 2] || '');
             salida.descripcionResiduo = rest.trim();
         }
     }
-    const fechaMatch = fullText.match(/(\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b)/);
-    if (fechaMatch) salida.fechaManifiesto = fechaMatch[1];
-    const folioMatch = fullText.match(/\bFOLIO[:\s\-]*([A-Z0-9\-]{3,})\b/i);
-    if (folioMatch) salida.folio = folioMatch[1];
     return salida;
 }
 
@@ -376,7 +341,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     return resultado;
 }
 
-// ==================== FUNCIÓN PRINCIPAL: iniciarAnalisis ====================
+// ==================== FUNCIÓN PRINCIPAL: iniciarAnalisis (usa recorte fijo) ====================
 async function iniciarAnalisis() {
     if (!currentImage) { safeMostrarError('Sube o captura la imagen primero.'); return; }
 
@@ -388,20 +353,11 @@ async function iniciarAnalisis() {
     if (firstCard) firstCard.style.display = 'none';
     if (processingCard) processingCard.style.display = 'block';
     if (resultsCard) resultsCard.style.display = 'none';
-    if (progressText) progressText.textContent = 'Ejecutando OCR...';
+    if (progressText) progressText.textContent = 'Ejecutando OCR por recortes...';
     if (progressBar) progressBar.style.width = '10%';
 
     try {
-        const ocrResult = await ejecutarOCR(currentImage);
-        if (progressBar) progressBar.style.width = '40%';
-        if (progressText) progressText.textContent = 'Extrayendo campos numerados (4 y 5)...';
-
-        console.log('OCR completo (primeras 1200 chars):', (ocrResult && ocrResult.data && ocrResult.data.text) ? (ocrResult.data.text.substring(0, 1200)) : '');
-        if (ocrResult && ocrResult.data && Array.isArray(ocrResult.data.words)) {
-            console.log('OCR palabras (primeras 60):', ocrResult.data.words.slice(0, 60).map(w => w.text));
-        }
-
-        const datos = extractFieldsFromBBoxes(ocrResult);
+        const datos = await extractFieldsByCrop(currentImage);
 
         if (progressBar) progressBar.style.width = '60%';
         if (progressText) progressText.textContent = 'Verificando contra lista maestra...';
@@ -412,7 +368,7 @@ async function iniciarAnalisis() {
         ultimoResultado = {
             ...datos,
             ...verif,
-            textoOriginal: (ocrResult && ocrResult.data && ocrResult.data.text) ? ocrResult.data.text : '',
+            textoOriginal: '', // ya almacenado en datos si se usó fallback
             fechaAnalisis: new Date().toISOString(),
             idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
         };
@@ -456,7 +412,6 @@ function mostrarResultadosEnInterfaz(resultado) {
         `;
     }
 
-    // mostrar coincidencias en verificationContent si aplica
     const verificationContent = document.getElementById('verificationContent');
     let detallesHTML = '';
     if (resultado.coincidencias && resultado.coincidencias.length > 0) {
@@ -539,3 +494,4 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('Script cargado: listo para validar manifiestos');
+  
