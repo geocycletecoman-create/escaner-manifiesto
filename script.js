@@ -26,12 +26,10 @@ function normalizeForCompare(s) {
     r = r.replace(/\s+/g, ' ').trim().toUpperCase();
     return r;
 }
-
 function escapeRegExp(str) {
     if (!str) return '';
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
 function safeMostrarError(mensaje) {
     if (typeof mostrarError === 'function') {
         try { mostrarError(mensaje); } catch (e) { console.error('mostrarError fallo:', e); alert(mensaje); }
@@ -77,7 +75,7 @@ function mostrarImagenPrevia(url) {
     const imagePreview = document.getElementById('imagePreview');
     if (!imagePreview) return;
     imagePreview.innerHTML = `
-        <img src="${url}" alt="Manifiesto" style="max-width:100%; max-height:380px;">
+        <img src="${url}" alt="Manifiesto" style="max-width:100%; max-height:380px;" id="previewImg">
         <button id="removeImage" class="btn btn-danger" style="margin-top:10px;">Eliminar Imagen</button>
     `;
     setTimeout(() => {
@@ -156,7 +154,6 @@ function fileToImage(file) {
         img.src = url;
     });
 }
-
 function cropImageToBlob(img, rect, quality = 0.95) {
     const canvas = document.createElement('canvas');
     const sx = Math.round(rect.x * img.naturalWidth);
@@ -182,63 +179,42 @@ async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
     if (!cropBlob) return '';
 
     try {
-        // ajustar psm para esta tarea
         try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: psm }); } catch (e) {}
-    } catch (e) {
-        // ignore
-    }
+    } catch (e) {}
 
     const result = await tesseractWorker.recognize(cropBlob);
     return (result && result.data && result.data.text) ? result.data.text.trim() : '';
 }
 
-// ==================== EXTRAER MEDIANTE CROPS (campos 4 y 5) ====================
-// Aquí definimos las coordenadas relativas (x,y,w,h) en fracciones [0..1].
-// Estas coordenadas están calculadas a partir de tus imágenes de ejemplo y pueden requerir
-// pequeños ajustes si los escaneos varían (rotación/escala/márgenes).
-//
-// RECOMENDACIÓN: si tus manifiestos siempre tienen el mismo layout, estos rects funcionarán bien.
-// Si ves desplazamientos, házmelo saber y te doy valores afinados.
-//
-// Valores iniciales (ajustables):
-// - razonRect: recorta la franja donde normalmente aparece "4.- RAZON SOCIAL ..."
-// - descrRect: recorta el bloque donde aparece "5.- DESCRIPCION" y las líneas de texto a la izquierda de la tabla
+// ==================== DEFAULT RECTS (Prueba A) ====================
+// Estos son los rects solicitados en "Prueba A"
 const DEFAULT_RECTS = {
-    // Ajusta estos valores si el recorte no queda centrado:
-    // x: distancia desde la izquierda (0..1), y: desde arriba, w: ancho, h: altura
-    // Estos valores son aproximados para la imagen de ejemplo; ajústalos en caso de variación.
-    razonRect: { x: 0.05, y: 0.20, w: 0.90, h: 0.07 },   // línea de razón social (4)
-    descrRect:  { x: 0.05, y: 0.30, w: 0.70, h: 0.20 }    // bloque de descripción (5) - NOTA: w < total para evitar tabla
+    razonRect: { x: 0.06, y: 0.215, w: 0.88, h: 0.06 }, // línea 4
+    descrRect: { x: 0.05, y: 0.345, w: 0.60, h: 0.14 }  // bloque descripción (izquierda sólo)
 };
 
+// ==================== EXTRAER MEDIANTE CROPS (campos 4 y 5) ====================
 async function extractFieldsByCrop(file) {
-    // Usa los rects por defecto; puedes exponer UI para ajustarlos si lo necesitas
     const { razonRect, descrRect } = DEFAULT_RECTS;
-
-    // 1) OCR en razón social (psm=7 -> single line)
     let razonText = '';
+    let descrText = '';
+    let fullResult = null;
+
     try {
-        razonText = await ocrCrop(file, razonRect, '7');
+        razonText = await ocrCrop(file, razonRect, '7'); // single line
     } catch (e) {
         console.warn('ocrCrop razon fallo:', e);
-        razonText = '';
     }
 
-    // 2) OCR en descripción (psm=6 -> auto para párrafos)
-    let descrText = '';
     try {
-        descrText = await ocrCrop(file, descrRect, '6');
+        descrText = await ocrCrop(file, descrRect, '6'); // paragraph
     } catch (e) {
         console.warn('ocrCrop descripcion fallo:', e);
-        descrText = '';
     }
 
-    // 3) Si crop devolvió poco (ej. OCR falló), fallback: OCR completo y extraer por numeración
-    let fullResult = null;
     if ((!razonText || razonText.length < 3) || (!descrText || descrText.length < 3)) {
         try {
             fullResult = await ejecutarOCR(file);
-            // usar fallback heurístico similar a antes
             const fallback = extraerCamposNumeradosFromFull(fullResult);
             if (!razonText || razonText.length < 3) razonText = fallback.razonSocial;
             if (!descrText || descrText.length < 3) descrText = fallback.descripcionResiduo;
@@ -247,7 +223,6 @@ async function extractFieldsByCrop(file) {
         }
     }
 
-    // limpieza
     razonText = (razonText || '').replace(/^\s*4[\.\-\)\:\s]*/i, '').replace(/RAZON SOCIAL.*?:?/i, '').trim();
     descrText = (descrText || '').replace(/^\s*5[\.\-\)\:\s]*/i, '').replace(/DESCRIPCION.*?:?/i, '').trim();
 
@@ -266,7 +241,6 @@ async function extractFieldsByCrop(file) {
     };
 }
 
-// Helper de fallback: extrae campos 4 y 5 del texto completo (similar a extraerCamposNumerados)
 function extraerCamposNumeradosFromFull(tesseractResult) {
     const salida = { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido' };
     if (!tesseractResult || !tesseractResult.data) return salida;
@@ -368,7 +342,7 @@ async function iniciarAnalisis() {
         ultimoResultado = {
             ...datos,
             ...verif,
-            textoOriginal: '', // ya almacenado en datos si se usó fallback
+            textoOriginal: '', // ya almacenado si se usó fallback
             fechaAnalisis: new Date().toISOString(),
             idAnalisis: 'ANL-' + Date.now().toString().slice(-8)
         };
@@ -391,15 +365,55 @@ async function iniciarAnalisis() {
     }
 }
 
-// ==================== mostrarResultadosEnInterfaz (simple) ====================
+// ==================== mostrarResultadosEnInterfaz (robusto) ====================
 function mostrarResultadosEnInterfaz(resultado) {
     if (!resultado) return;
-    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value || ''; };
-    setText('detectedCompany', resultado.razonSocial);
-    setText('detectedWaste', resultado.descripcionResiduo);
-    setText('detectedDate', resultado.fechaManifiesto);
-    setText('detectedFolio', resultado.folio);
+    function setField(selectorOrId, value) {
+        if (value === undefined || value === null) value = '';
+        const byId = document.getElementById(selectorOrId);
+        if (byId) {
+            if ('value' in byId) byId.value = value;
+            byId.textContent = value;
+            byId.innerText = value;
+            return true;
+        }
+        const bySel = document.querySelector(selectorOrId);
+        if (bySel) {
+            if ('value' in bySel) bySel.value = value;
+            bySel.textContent = value;
+            bySel.innerText = value;
+            return true;
+        }
+        return false;
+    }
 
+    const company = resultado.razonSocial || '';
+    const waste = resultado.descripcionResiduo || '';
+    const date = resultado.fechaManifiesto || '';
+    const folio = resultado.folio || '';
+
+    // Intentar varios selectores comunes - agrega aquí los IDs exactos de tu HTML si los conoces
+    setField('detectedCompany', company);
+    setField('#detectedCompany', company);
+    setField('input[name="razonSocial"]', company);
+    setField('#razonSocial', company);
+    setField('.detected-company', company);
+
+    setField('detectedWaste', waste);
+    setField('#detectedWaste', waste);
+    setField('textarea[name="descripcionResiduo"]', waste);
+    setField('#descripcionResiduo', waste);
+    setField('.detected-waste', waste);
+
+    setField('detectedDate', date);
+    setField('#detectedDate', date);
+    setField('input[name="fechaManifiesto"]', date);
+
+    setField('detectedFolio', folio);
+    setField('#detectedFolio', folio);
+    setField('input[name="folio"]', folio);
+
+    // Actualizar panel de veredicto
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
     if (resultStatus) {
@@ -412,6 +426,7 @@ function mostrarResultadosEnInterfaz(resultado) {
         `;
     }
 
+    // verification details
     const verificationContent = document.getElementById('verificationContent');
     let detallesHTML = '';
     if (resultado.coincidencias && resultado.coincidencias.length > 0) {
@@ -425,6 +440,8 @@ function mostrarResultadosEnInterfaz(resultado) {
         detallesHTML += `<div class="no-matches"><i class="bi bi-check-circle-fill" style="color:#38a169;font-size:2rem"></i><p>No se encontraron coincidencias en listas reguladas.</p></div>`;
     }
     if (verificationContent) verificationContent.innerHTML = detallesHTML;
+
+    console.log('mostrarResultadosEnInterfaz: company=', company, 'waste=', waste, 'date=', date, 'folio=', folio);
 }
 
 // ==================== Incidencias, reportes y utilidades (resumidas) ====================
