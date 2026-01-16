@@ -9,12 +9,109 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+    <style>
+        /* Estilos mínimos para posicionar la imagen en la esquina superior derecha */
+        header {
+            position: relative;
+            padding: 1rem 1rem 1.5rem 1rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        header .title-block {
+            flex: 1;
+        }
+
+        #topRightLogo {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            max-height: 96px;
+            width: auto;
+            display: block;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+            background: white;
+            padding: 4px;
+            object-fit: contain;
+        }
+
+        /* Controles para cambiar/eliminar logo */
+        .logo-controls {
+            position: absolute;
+            top: 12px;
+            right: calc(12px + 100px); /* desplazar a la izquierda del logo */
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .logo-btn {
+            background: rgba(255,255,255,0.95);
+            border: 1px solid #ddd;
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .logo-btn:active { transform: translateY(1px); }
+
+        /* Responsive: en pantallas pequeñas movemos el logo al final del header y lo hacemos más pequeño */
+        @media (max-width: 600px) {
+            #topRightLogo {
+                position: static;
+                max-height: 56px;
+                margin-left: 0;
+                margin-top: 0.5rem;
+                float: none;
+            }
+            .logo-controls {
+                position: static;
+                margin-top: 0.5rem;
+                right: auto;
+            }
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+
+        /* Ajustes opcionales para que el header no tape contenido con la imagen absoluta */
+        .container {
+            padding-top: 0.5rem;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1><i class="bi bi-file-earmark-medical"></i> Validador de Manifiestos</h1>
-            <p class="subtitle">Escanea manifiestos y detecta automáticamente si son aceptables según tu lista maestra</p>
+            <div class="title-block">
+                <h1><i class="bi bi-file-earmark-medical"></i> Validador de Manifiestos</h1>
+                <p class="subtitle">Escanea manifiestos y detecta automáticamente si son aceptables según tu lista maestra</p>
+            </div>
+
+            <!-- Controles para cargar/eliminar logo desde el ordenador -->
+            <div class="logo-controls" aria-hidden="false">
+                <label for="logoInput" class="logo-btn" title="Cargar logo desde tu ordenador" role="button">
+                    <i class="bi bi-upload"></i>
+                    <span>Cargar logo</span>
+                </label>
+                <button id="removeLogoBtn" class="logo-btn" title="Eliminar logo (volver al predeterminado)">
+                    <i class="bi bi-trash"></i>
+                    <span>Eliminar</span>
+                </button>
+                <!-- Input oculto para seleccionar archivo -->
+                <input id="logoInput" type="file" accept="image/*" style="display:none">
+            </div>
+
+            <!-- Imagen en la esquina superior derecha.
+                 Si no hay logo cargado, se mostrará un espacio vacío (o puedes colocar un src por defecto aquí). -->
+            <img id="topRightLogo" src="" alt="Logo" style="display:none">
         </header>
 
         <!-- PASO 1: CAPTURAR DOCUMENTO -->
@@ -195,7 +292,94 @@
 
     <!-- Tesseract.js para OCR -->
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@v4.0.2/dist/tesseract.min.js'></script>
+
+    <!-- Script para gestionar la carga del logo desde el ordenador y persistir en localStorage -->
+    <script>
+        (function () {
+            const logoInput = document.getElementById('logoInput');
+            const topRightLogo = document.getElementById('topRightLogo');
+            const removeLogoBtn = document.getElementById('removeLogoBtn');
+            const STORAGE_KEY = 'topRightLogoDataUrl_v1';
+
+            // Cargar logo desde localStorage si existe
+            function loadLogoFromStorage() {
+                try {
+                    const dataUrl = localStorage.getItem(STORAGE_KEY);
+                    if (dataUrl) {
+                        topRightLogo.src = dataUrl;
+                        topRightLogo.style.display = 'block';
+                    } else {
+                        topRightLogo.src = '';
+                        topRightLogo.style.display = 'none';
+                    }
+                } catch (e) {
+                    // Si localStorage no está disponible, simplemente oculta el logo por defecto
+                    topRightLogo.src = '';
+                    topRightLogo.style.display = 'none';
+                    console.warn('No se pudo acceder a localStorage:', e);
+                }
+            }
+
+            // Manejar archivo seleccionado
+            logoInput.addEventListener('change', function (ev) {
+                const file = ev.target.files && ev.target.files[0];
+                if (!file) return;
+
+                // Validaciones básicas
+                if (!file.type.startsWith('image/')) {
+                    alert('Por favor selecciona un archivo de imagen (png, jpg, jpeg, webp, ...).');
+                    logoInput.value = '';
+                    return;
+                }
+                const maxSizeMB = 4;
+                if (file.size > maxSizeMB * 1024 * 1024) {
+                    alert('El archivo es demasiado grande. Tamaño máximo recomendado: ' + maxSizeMB + ' MB.');
+                    logoInput.value = '';
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const dataUrl = e.target.result;
+                    // Mostrar el logo
+                    topRightLogo.src = dataUrl;
+                    topRightLogo.style.display = 'block';
+
+                    // Persistir en localStorage para que el logo permanezca entre recargas
+                    try {
+                        localStorage.setItem(STORAGE_KEY, dataUrl);
+                    } catch (err) {
+                        console.warn('No fue posible guardar el logo en localStorage:', err);
+                    }
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // Click en eliminar logo
+            removeLogoBtn.addEventListener('click', function () {
+                if (!confirm('¿Eliminar el logo actual? Esto lo quitará de la vista y no se restaurará automáticamente.')) return;
+
+                topRightLogo.src = '';
+                topRightLogo.style.display = 'none';
+                logoInput.value = '';
+
+                try {
+                    localStorage.removeItem(STORAGE_KEY);
+                } catch (e) {
+                    console.warn('No se pudo eliminar logo de localStorage:', e);
+                }
+            });
+
+            // Inicializar al cargar la página
+            loadLogoFromStorage();
+
+            // Hacer que label abra el file picker (ya se usa label for="logoInput", no hace falta JS extra)
+            // Nota: si quieres que el logo sea también clicable para cambiarlo, descomenta lo siguiente:
+            // topRightLogo.addEventListener('click', () => logoInput.click());
+        })();
+    </script>
+
+    <!-- Tu script principal de la app (si existe) -->
     <script src="script.js"></script>
 </body>
 </html>
-   
