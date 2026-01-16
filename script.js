@@ -494,4 +494,3 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('Script cargado: listo para validar manifiestos');
-  
