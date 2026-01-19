@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
 
     <style>
-        /* Estilos mínimos para posicionar la imagen en la esquina superior derecha */
+        /* Header / logo */
         header {
             position: relative;
             padding: 1rem 1rem 1.5rem 1rem;
@@ -19,170 +19,66 @@
             align-items: flex-start;
             gap: 1rem;
         }
-
-        header .title-block {
-            flex: 1;
-        }
-
+        header .title-block { flex: 1; }
         #topRightLogo {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            max-height: 96px;
-            width: auto;
-            display: block;
-            border-radius: 8px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-            background: white;
-            padding: 4px;
-            object-fit: contain;
+            position: absolute; top: 12px; right: 12px;
+            max-height: 96px; width: auto; display: block;
+            border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+            background: white; padding: 4px; object-fit: contain;
             transition: opacity 200ms ease, transform 160ms ease;
         }
-
-        /* Placeholder visual: cuando no hay logo real se muestra un estilo más tenue */
-        #topRightLogo.placeholder {
-            opacity: 0.7;
-            filter: grayscale(30%);
-            transform: scale(1);
-        }
-
-        /* Controles para cambiar/eliminar logo desde el ordenador */
+        #topRightLogo.placeholder { opacity: 0.7; filter: grayscale(30%); transform: scale(1); }
         .logo-controls {
-            position: absolute;
-            top: 12px;
-            right: calc(12px + 100px); /* desplazar a la izquierda del logo */
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-            transition: width 240ms ease;
+            position: absolute; top: 12px; right: calc(12px + 100px);
+            display: flex; gap: 0.5rem; align-items: center; transition: width 240ms ease;
         }
         .logo-btn {
-            background: rgba(255,255,255,0.95);
-            border: 1px solid #ddd;
-            padding: 6px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
+            background: rgba(255,255,255,0.95); border: 1px solid #ddd;
+            padding: 6px 8px; border-radius: 6px; cursor: pointer;
+            font-size: 0.9rem; display: inline-flex; align-items: center; gap: 6px;
         }
-
-        .logo-btn:active { transform: translateY(1px); }
-
-        .logo-controls .logo-text {
-            display: inline-block;
-            white-space: nowrap;
-            overflow: hidden;
-            vertical-align: middle;
-            transition: opacity 200ms ease, width 200ms ease, margin 200ms ease, padding 200ms ease;
-            opacity: 1;
-            width: auto;
-        }
-
-        .logo-controls.has-logo .logo-text {
-            opacity: 0;
-            width: 0;
-            margin: 0;
-            padding: 0;
-            pointer-events: none;
-        }
-
-        .logo-controls .bi {
-            font-size: 1.05rem;
-            line-height: 1;
-        }
+        .logo-controls .logo-text { transition: opacity 200ms ease, width 200ms ease; }
+        .logo-controls.has-logo .logo-text { opacity: 0; width: 0; margin: 0; padding:0; pointer-events:none; }
 
         @media (max-width: 600px) {
-            #topRightLogo {
-                position: static;
-                max-height: 56px;
-                margin-left: 0;
-                margin-top: 0.5rem;
-                float: none;
-            }
-            .logo-controls {
-                position: static;
-                margin-top: 0.5rem;
-                right: auto;
-            }
-            header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
+            #topRightLogo { position: static; max-height: 56px; margin-top: 0.5rem; }
+            .logo-controls { position: static; margin-top: 0.5rem; right: auto; }
+            header { flex-direction: column; align-items: flex-start; }
         }
 
-        .container {
-            padding-top: 0.5rem;
-        }
+        .container { padding-top: 0.5rem; max-width:1100px; margin: 0 auto; }
 
-        /* ---- Styles for instructions toggle panel ---- */
-        .instructions-card {
-            border-radius: 8px;
-            padding: 0;
-            overflow: visible;
-        }
+        /* Basic card styles */
+        .card { background:#fff; border-radius:8px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+        .card-header h3 { margin:0; display:flex; gap:8px; align-items:center; }
+        .btn { padding:8px 12px; border-radius:6px; border:0; background:#2b6cb0; color:#fff; cursor:pointer; }
+        .btn:disabled { opacity:0.6; cursor:not-allowed; }
+        .btn-outline { background:transparent; border:1px solid #cbd5e1; color:#2d3748; padding:8px 12px; border-radius:6px; cursor:pointer; }
+        .data-label { display:block; font-weight:600; }
+        .data-value { display:block; padding:8px 10px; background:#f7fafc; border-radius:6px; margin-top:6px; white-space:pre-wrap; }
+
+        /* Instructions toggle panel */
+        .instructions-card { border-radius:8px; padding:0; overflow:visible; }
         .instructions-header {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            padding:12px 16px;
-            background:#2b6cb0;
-            color:white;
-            border-radius:8px 8px 0 0;
+            display:flex; align-items:center; justify-content:space-between;
+            padding:12px 16px; background:#2b6cb0; color:white; border-radius:8px 8px 0 0;
         }
-        .instructions-header h3 {
-            margin:0;
-            font-size:1.05rem;
-            display:flex;
-            align-items:center;
-            gap:8px;
-        }
+        .instructions-header h3 { margin:0; font-size:1.05rem; display:flex; align-items:center; gap:8px; }
         .toggle-btn {
-            background: rgba(255,255,255,0.12);
-            border: 1px solid rgba(255,255,255,0.12);
-            color: #fff;
-            padding:6px 10px;
-            border-radius:6px;
-            cursor:pointer;
-            display:inline-flex;
-            align-items:center;
-            gap:8px;
-            font-weight:600;
+            background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.12);
+            color:#fff; padding:6px 10px; border-radius:6px; cursor:pointer; display:inline-flex;
+            align-items:center; gap:8px; font-weight:600;
         }
-        .toggle-btn:focus { outline:2px solid rgba(255,255,255,0.18); }
-
         .instructions-wrapper {
-            background:#e6f2ff;
-            border-left:6px solid #2b6cb0;
-            padding:14px;
-            transition: max-height 260ms ease, padding 260ms ease;
-            overflow:hidden;
-            max-height:600px; /* default expanded */
+            background:#e6f2ff; border-left:6px solid #2b6cb0; padding:14px;
+            transition: max-height 260ms ease, padding 260ms ease; overflow:hidden; max-height:600px;
         }
-        .instructions-wrapper.collapsed {
-            max-height:0;
-            padding-top:0;
-            padding-bottom:0;
-        }
-
+        .instructions-wrapper.collapsed { max-height:0; padding-top:0; padding-bottom:0; }
         .instructions ol { margin:0 0 8px 18px; }
         .instructions .important { background:#fff6d8; padding:8px; border-radius:6px; margin-top:10px; }
 
-        /* small responsive tweaks */
-        @media (max-width:720px) {
-          .data-grid { grid-template-columns: 1fr; }
-        }
-
-        /* utility for small outline button used elsewhere */
-        .btn-outline {
-            background: transparent;
-            border: 1px solid #cbd5e1;
-            color: #2d3748;
-            padding:8px 12px;
-            border-radius:6px;
-            cursor:pointer;
-        }
+        /* Responsive */
+        @media (max-width:720px) { .data-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -214,116 +110,90 @@
                 <h3><i class="bi bi-camera"></i> Paso 1: Capturar Manifiesto</h3>
             </div>
             <div class="card-body">
-                <div class="upload-options">
-                    <button id="cameraBtn" class="btn">
-                        <i class="bi bi-camera"></i> Usar Cámara
-                    </button>
-                    <button id="uploadBtn" class="btn">
-                        <i class="bi bi-upload"></i> Subir Imagen
-                    </button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button id="cameraBtn" class="btn"><i class="bi bi-camera"></i> Usar Cámara</button>
+                    <button id="uploadBtn" class="btn"><i class="bi bi-upload"></i> Subir Imagen</button>
                     <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+                    <button id="processBtn" class="btn" disabled style="background:#8b5cf6;"><i class="bi bi-magic"></i> Analizar Manifiesto</button>
                 </div>
 
-                <div class="preview-container" style="margin-top:12px;">
-                    <div id="imagePreview" class="image-preview" style="display:flex; align-items:center; justify-content:center; min-height:220px; border:2px dashed #cbd5e1; border-radius:6px; background:#fff;">
-                        <div style="text-align:center;color:#94a3b8">
-                          <p><i class="bi bi-image" style="font-size: 3rem;"></i></p>
-                          <p>No hay imagen seleccionada</p>
-                        </div>
-                    </div>
-                    <div id="cameraView" class="camera-view" style="display: none; margin-top:10px;">
-                        <video id="cameraStream" autoplay playsinline style="width:100%;max-height:360px;background:#000;"></video>
-                        <div class="camera-controls" style="margin-top:8px;">
-                            <button id="captureBtn" class="btn" style="background:#2f855a">Capturar</button>
-                            <button id="cancelCameraBtn" class="btn btn-outline">Cancelar</button>
-                        </div>
+                <div id="imagePreview" style="display:flex; align-items:center; justify-content:center; min-height:220px; border:2px dashed #cbd5e1; border-radius:6px; background:#fff; margin-top:12px;">
+                    <div style="text-align:center;color:#94a3b8">
+                        <p><i class="bi bi-image" style="font-size: 3rem;"></i></p>
+                        <p>No hay imagen seleccionada</p>
                     </div>
                 </div>
-                
-                <div class="process-button-container" style="margin-top:12px;">
-                    <button id="processBtn" class="btn" disabled style="background:#8b5cf6">
-                        <i class="bi bi-magic"></i> Analizar Manifiesto
-                    </button>
+
+                <div id="cameraView" style="display:none; margin-top:12px;">
+                    <video id="cameraStream" autoplay playsinline style="width:100%;max-height:360px;background:#000;"></video>
+                    <div style="margin-top:8px; display:flex; gap:8px;">
+                        <button id="captureBtn" class="btn" style="background:#2f855a">Capturar</button>
+                        <button id="cancelCameraBtn" class="btn btn-outline">Cancelar</button>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- PASO 2: PROCESAMIENTO (OCULTO INICIALMENTE) -->
-        <div class="card processing-card" style="display: none;">
-            <div class="card-header">
-                <h3><i class="bi bi-hourglass-split"></i> Procesando...</h3>
-            </div>
+        <!-- PASO 2: PROCESSING -->
+        <div class="card processing-card" style="display:none;">
+            <div class="card-header"><h3><i class="bi bi-hourglass-split"></i> Procesando...</h3></div>
             <div class="card-body">
-                <div class="loading">
-                    <p id="progressText">Iniciando análisis del manifiesto...</p>
-                    <div class="progress" style="background:#edf2f7;border-radius:8px;height:10px;overflow:hidden;">
-                        <div id="progressBar" class="progress-bar" style="width:0%;height:100%;background:#667eea;"></div>
-                    </div>
-                    <p class="processing-detail" style="margin-top:8px;">Extrayendo datos con OCR...</p>
+                <p id="progressText">Iniciando análisis del manifiesto...</p>
+                <div style="background:#edf2f7;border-radius:8px;height:10px;overflow:hidden;">
+                    <div id="progressBar" style="width:0%;height:100%;background:#667eea;"></div>
                 </div>
+                <p style="margin-top:8px;">Extrayendo datos con OCR...</p>
             </div>
         </div>
 
-        <!-- PASO 3: RESULTADOS DEL ANÁLISIS -->
-        <div class="card results-card" style="display: none;">
-            <div class="card-header">
-                <h3><i class="bi bi-clipboard-check"></i> Resultado del Análisis</h3>
-            </div>
+        <!-- PASO 3: RESULTADOS -->
+        <div class="card results-card" style="display:none;">
+            <div class="card-header"><h3><i class="bi bi-clipboard-check"></i> Resultado del Análisis</h3></div>
             <div class="card-body">
-                
-                <!-- VEREDICTO PRINCIPAL -->
-                <div id="resultStatus" class="result-status"></div>
-                
-                <!-- DATOS EXTRAÍDOS DEL MANIFIESTO -->
-                <div class="extracted-data" style="margin-top:12px;">
+                <div id="resultStatus"></div>
+
+                <div style="margin-top:12px;">
                     <h4><i class="bi bi-card-checklist"></i> Datos Identificados del Manifiesto</h4>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                        <div class="data-item">
-                            <span class="data-label" style="display:block;font-weight:600;">Razón Social (Generador):</span>
-                            <span id="detectedCompany" class="data-value">No identificado</span>
+                        <div>
+                            <span class="data-label">Razón Social (Generador):</span>
+                            <div id="detectedCompany" class="data-value">No identificado</div>
                         </div>
-                        <div class="data-item">
-                            <span class="data-label" style="display:block;font-weight:600;">Descripción del Residuo:</span>
-                            <span id="detectedWaste" class="data-value">No identificado</span>
+                        <div>
+                            <span class="data-label">Descripción del Residuo:</span>
+                            <div id="detectedWaste" class="data-value">No identificado</div>
                         </div>
                     </div>
                 </div>
-                
-                <!-- DETALLES DE LA VERIFICACIÓN -->
-                <div id="verificationDetails" class="verification-details" style="margin-top:12px;">
+
+                <div id="verificationDetails" style="margin-top:12px;">
                     <h4><i class="bi bi-search"></i> Detalles de la Verificación</h4>
                     <div id="verificationContent"></div>
                 </div>
-                
-                <!-- SECCIÓN DE INCIDENCIA (SOLO SI ES RECHAZADO) -->
-                <div id="incidenceSection" class="incidence-section" style="display: none; margin-top:12px;">
+
+                <div id="incidenceSection" style="display:none;margin-top:12px;">
                     <h4><i class="bi bi-exclamation-triangle"></i> Gestión de Incidencia</h4>
-                    <p class="incidence-info">Este manifiesto ha sido <strong>rechazado</strong>. Por favor, registre la incidencia para seguimiento.</p>
-                    <div class="incidence-form" style="margin-top:8px;">
-                        <div class="form-group">
-                            <label for="incidenceNotes">Observaciones de la Incidencia *</label>
-                            <textarea id="incidenceNotes" rows="3" style="width:100%;"></textarea>
-                        </div>
-                        <div style="margin-top:8px;">
-                            <label for="assignedTo">Asignar a (Responsable):</label>
-                            <input type="text" id="assignedTo" style="width:100%;" placeholder="Ej: Departamento Ambiental">
-                        </div>
+                    <p>Este manifiesto ha sido <strong>rechazado</strong>. Registre la incidencia para seguimiento.</p>
+                    <div style="margin-top:8px;">
+                        <label for="incidenceNotes">Observaciones *</label>
+                        <textarea id="incidenceNotes" rows="3" style="width:100%"></textarea>
+                        <label for="assignedTo" style="margin-top:8px;display:block;">Asignar a (Responsable)</label>
+                        <input id="assignedTo" type="text" style="width:100%" placeholder="Ej: Departamento Ambiental">
                         <div style="margin-top:8px;">
                             <button id="registerIncidenceBtn" class="btn" style="background:#e53e3e">Registrar Incidencia</button>
-                            <button id="skipIncidenceBtn" class="btn btn-outline">Omitir por ahora</button>
+                            <button id="skipIncidenceBtn" class="btn btn-outline">Omitir</button>
                         </div>
                     </div>
                 </div>
-                
-                <!-- ACCIONES FINALES -->
-                <div class="final-actions" style="margin-top:12px;">
+
+                <div style="margin-top:12px;">
                     <button id="newScanBtn" class="btn">Nuevo Escaneo</button>
                     <button id="downloadReportBtn" class="btn btn-outline">Descargar Reporte</button>
                 </div>
             </div>
         </div>
 
-        <!-- INSTRUCCIONES PLEGABLE/CERRABLE (toggle) -->
+        <!-- PANELES INSTRUCCIONES: plegable/cerrable con boton visible (INICIO expandido) -->
         <div class="card instructions-card" style="margin-top:16px;">
             <div class="instructions-header" role="heading" aria-level="3">
                 <h3><i class="bi bi-info-circle"></i> ¿Cómo funciona el sistema?</h3>
@@ -367,61 +237,41 @@
 
             function setHasLogoClass(has) {
                 if (!logoControls) return;
-                if (has) logoControls.classList.add('has-logo');
-                else logoControls.classList.remove('has-logo');
+                if (has) logoControls.classList.add('has-logo'); else logoControls.classList.remove('has-logo');
             }
-
             function setPlaceholderClass(isPlaceholder) {
                 if (!topRightLogo) return;
-                if (isPlaceholder) topRightLogo.classList.add('placeholder');
-                else topRightLogo.classList.remove('placeholder');
+                if (isPlaceholder) topRightLogo.classList.add('placeholder'); else topRightLogo.classList.remove('placeholder');
             }
 
             function loadLogoFromStorage() {
                 try {
                     const dataUrl = localStorage.getItem(STORAGE_KEY);
                     if (dataUrl) {
-                        topRightLogo.src = dataUrl;
-                        setHasLogoClass(true);
-                        setPlaceholderClass(false);
+                        topRightLogo.src = dataUrl; setHasLogoClass(true); setPlaceholderClass(false);
                     } else {
-                        topRightLogo.src = PLACEHOLDER_DATA_URL;
-                        setHasLogoClass(false);
-                        setPlaceholderClass(true);
+                        topRightLogo.src = PLACEHOLDER_DATA_URL; setHasLogoClass(false); setPlaceholderClass(true);
                     }
                     topRightLogo.style.display = 'block';
                 } catch (e) {
-                    topRightLogo.src = PLACEHOLDER_DATA_URL;
-                    topRightLogo.style.display = 'block';
-                    setHasLogoClass(false);
-                    setPlaceholderClass(true);
+                    topRightLogo.src = PLACEHOLDER_DATA_URL; topRightLogo.style.display = 'block';
+                    setHasLogoClass(false); setPlaceholderClass(true);
                     console.warn('No se pudo acceder a localStorage:', e);
                 }
             }
 
+            // Bind input change
             logoInput.addEventListener('change', function (ev) {
                 const file = ev.target.files && ev.target.files[0];
                 if (!file) return;
-                if (!file.type.startsWith('image/')) {
-                    alert('Por favor selecciona un archivo de imagen (png, jpg, jpeg, webp, ...).');
-                    logoInput.value = '';
-                    return;
-                }
+                if (!file.type.startsWith('image/')) { alert('Seleccione una imagen.'); logoInput.value=''; return; }
                 const maxSizeMB = 4;
-                if (file.size > maxSizeMB * 1024 * 1024) {
-                    alert('El archivo es demasiado grande. Tamaño máximo recomendado: ' + maxSizeMB + ' MB.');
-                    logoInput.value = '';
-                    return;
-                }
-
+                if (file.size > maxSizeMB * 1024 * 1024) { alert('Archivo muy grande. Max ' + maxSizeMB + 'MB.'); logoInput.value=''; return; }
                 const reader = new FileReader();
                 reader.onload = function (e) {
-                    const dataUrl = e.target.result;
-                    topRightLogo.src = dataUrl;
-                    topRightLogo.style.display = 'block';
-                    setHasLogoClass(true);
-                    setPlaceholderClass(false);
-                    try { localStorage.setItem(STORAGE_KEY, dataUrl); } catch (err) { console.warn('No fue posible guardar el logo en localStorage:', err); }
+                    const dataUrl = e.target.result; topRightLogo.src = dataUrl; topRightLogo.style.display='block';
+                    setHasLogoClass(true); setPlaceholderClass(false);
+                    try { localStorage.setItem(STORAGE_KEY, dataUrl); } catch (err) { console.warn('No se pudo guardar logo:', err); }
                 };
                 reader.readAsDataURL(file);
             });
@@ -429,18 +279,14 @@
             removeLogoBtn.addEventListener('click', function () {
                 if (!confirm('¿Eliminar el logo actual?')) return;
                 try { localStorage.removeItem(STORAGE_KEY); } catch (e) { console.warn('No se pudo eliminar logo de localStorage:', e); }
-                topRightLogo.src = PLACEHOLDER_DATA_URL;
-                topRightLogo.style.display = 'block';
-                setHasLogoClass(false);
-                setPlaceholderClass(true);
-                logoInput.value = '';
+                topRightLogo.src = PLACEHOLDER_DATA_URL; topRightLogo.style.display='block'; setHasLogoClass(false); setPlaceholderClass(true); logoInput.value='';
             });
 
             loadLogoFromStorage();
         })();
     </script>
 
-    <!-- Script para toggle del panel de instrucciones -->
+    <!-- Script para toggle del panel de instrucciones (FORZAR expandido al inicio y mostrar "Ocultar") -->
     <script>
       (function(){
         const toggleBtn = document.getElementById('toggleInstructionsBtn');
@@ -449,45 +295,40 @@
         const toggleText = document.getElementById('toggleText');
         const STORAGE_KEY = 'instructionsCollapsed_v1';
 
-        // Initialize based on saved state (default: expanded)
+        // Forzar expandido en la carga inicial: eliminar el valor guardado para que aparezca expandido
+        // (si quieres respetar el valor guardado en futuras sesiones, comenta la siguiente línea)
+        // localStorage.removeItem(STORAGE_KEY);
+
+        // Inicializar: respetar valor guardado si existe, si no -> expandido
         const saved = localStorage.getItem(STORAGE_KEY);
         const collapsed = saved === 'true';
         if (collapsed) {
-          wrapper.classList.add('collapsed');
-          wrapper.setAttribute('aria-hidden','true');
-          toggleBtn.setAttribute('aria-expanded','false');
-          toggleIcon.innerHTML = '<i class="bi bi-chevron-down"></i>';
+          wrapper.classList.add('collapsed'); wrapper.setAttribute('aria-hidden','true');
+          toggleBtn.setAttribute('aria-expanded','false'); toggleIcon.innerHTML = '<i class="bi bi-chevron-down"></i>';
           toggleText.textContent = 'Mostrar';
         } else {
-          wrapper.classList.remove('collapsed');
-          wrapper.setAttribute('aria-hidden','false');
-          toggleBtn.setAttribute('aria-expanded','true');
-          toggleIcon.innerHTML = '<i class="bi bi-chevron-up"></i>';
+          wrapper.classList.remove('collapsed'); wrapper.setAttribute('aria-hidden','false');
+          toggleBtn.setAttribute('aria-expanded','true'); toggleIcon.innerHTML = '<i class="bi bi-chevron-up"></i>';
           toggleText.textContent = 'Ocultar';
         }
 
         toggleBtn.addEventListener('click', function(){
           const isCollapsed = wrapper.classList.toggle('collapsed');
           if (isCollapsed) {
-            wrapper.setAttribute('aria-hidden','true');
-            toggleBtn.setAttribute('aria-expanded','false');
-            toggleIcon.innerHTML = '<i class="bi bi-chevron-down"></i>';
-            toggleText.textContent = 'Mostrar';
+            wrapper.setAttribute('aria-hidden','true'); toggleBtn.setAttribute('aria-expanded','false');
+            toggleIcon.innerHTML = '<i class="bi bi-chevron-down"></i>'; toggleText.textContent = 'Mostrar';
             localStorage.setItem(STORAGE_KEY, 'true');
           } else {
-            wrapper.setAttribute('aria-hidden','false');
-            toggleBtn.setAttribute('aria-expanded','true');
-            toggleIcon.innerHTML = '<i class="bi bi-chevron-up"></i>';
-            toggleText.textContent = 'Ocultar';
+            wrapper.setAttribute('aria-hidden','false'); toggleBtn.setAttribute('aria-expanded','true');
+            toggleIcon.innerHTML = '<i class="bi bi-chevron-up"></i>'; toggleText.textContent = 'Ocultar';
             localStorage.setItem(STORAGE_KEY, 'false');
-            // smooth scroll to shown content
             wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         });
       })();
     </script>
 
-    <!-- Tu script principal -->
+    <!-- Enlace a tu script principal (OCR y lógica) -->
     <script src="script.js"></script>
 </body>
 </html>
