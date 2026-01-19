@@ -13,8 +13,8 @@ const PALABRAS_PELIGROSAS = [
 ];
 
 // ==================== GLOBALES ====================
-let currentImage = null;
-let tesseractWorker = null;
+let currentImage = null;       // File/Blob actual
+let tesseractWorker = null;    // worker global
 let cameraStream = null;
 let ultimoResultado = null;
 let historialIncidencias = [];
@@ -54,6 +54,7 @@ async function openCamera() {
         if (fileInput) fileInput.click();
     }
 }
+
 function handleFileSelect(event) {
     const file = (event.target && event.target.files && event.target.files[0]) || null;
     if (!file) return;
@@ -66,6 +67,7 @@ function handleFileSelect(event) {
     const processBtn = document.getElementById('processBtn');
     if (processBtn) processBtn.disabled = false;
 }
+
 function mostrarImagenPrevia(url) {
     const imagePreview = document.getElementById('imagePreview');
     if (!imagePreview) return;
@@ -83,6 +85,7 @@ function mostrarImagenPrevia(url) {
         });
     }, 50);
 }
+
 function captureFromCamera() {
     const video = document.getElementById('cameraStream');
     if (!video) return;
@@ -101,6 +104,7 @@ function captureFromCamera() {
         if (processBtn) processBtn.disabled = false;
     }, 'image/jpeg', 0.9);
 }
+
 function closeCamera() {
     if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
     cameraStream = null;
@@ -124,19 +128,20 @@ async function inicializarTesseract() {
         safeMostrarError('No fue posible inicializar OCR (Tesseract).');
     }
 }
+
 async function ejecutarOCR(imagen) {
     if (!imagen) throw new Error('No hay imagen para OCR');
     if (!tesseractWorker) await inicializarTesseract();
     try {
         const result = await tesseractWorker.recognize(imagen);
-        return result;
+        return result; // objeto completo
     } catch (e) {
         console.error('Error en ejecutarOCR', e);
         throw e;
     }
 }
 
-// ==================== HELPERS file->image y crop ====================
+// ==================== HELPERS: file->image y crop -> blob ====================
 function fileToImage(file) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
@@ -177,309 +182,318 @@ const DEFAULT_RECTS = {
     descrRect: { x: 0.05, y: 0.30, w: 0.80, h: 0.20 }
 };
 
-// ==================== DETECCIÓN DE ETIQUETAS (WORD BBOX) ====================
-async function detectLabelRectsUsingWords(file) {
-    if (!file) return null;
-    if (!tesseractWorker) await inicializarTesseract();
-    try {
-        try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
-        const res = await tesseractWorker.recognize(file);
-        const wordsRaw = (res && res.data && res.data.words) ? res.data.words : [];
-        if (!wordsRaw.length) return null;
-
-        // normalize words into consistent bbox format
-        const words = wordsRaw.map(w => {
-            const text = (w.text || w.word || '').toString().trim();
-            let x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-            if (w.bbox && typeof w.bbox === 'object') {
-                x0 = w.bbox.x0 || w.bbox.x || w.bbox.left || 0;
-                y0 = w.bbox.y0 || w.bbox.y || w.bbox.top || 0;
-                x1 = w.bbox.x1 || (w.bbox.x0 ? w.bbox.x1 : (w.bbox.x || 0));
-                y1 = w.bbox.y1 || (w.bbox.y0 ? w.bbox.y1 : (w.bbox.y || 0));
-            } else {
-                x0 = w.x0 || w.left || 0;
-                y0 = w.y0 || w.top || 0;
-                x1 = w.x1 || (w.left ? w.left + (w.width || 0) : x0 + (w.width || 0));
-                y1 = w.y1 || (w.top ? w.top + (w.height || 0) : y0 + (w.height || 0));
-            }
-            if (x1 < x0) { const t = x0; x0 = x1; x1 = t; }
-            if (y1 < y0) { const t = y0; y0 = y1; y1 = t; }
-            return { text, x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
-        }).filter(w => w.text && w.text.length > 0);
-
-        if (!words.length) return null;
-
-        const img = await fileToImage(file);
-        const imgW = img.naturalWidth || img.width || 1;
-        const imgH = img.naturalHeight || img.height || 1;
-        const normalize = s => (s || '').replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g, ' ').trim().toUpperCase();
-
-        // locate RAZON SOCIAL label
-        let razonLabelBox = null;
-        for (let i = 0; i < words.length; i++) {
-            const t = normalize(words[i].text);
-            if (t.includes('RAZON') || t.includes('RAZÓN')) {
-                const lineY = words[i].cy;
-                const nearby = words.filter(w => Math.abs(w.cy - lineY) < Math.max(12, w.h));
-                const social = nearby.find(n => normalize(n.text).includes('SOCIAL'));
-                if (social) {
-                    razonLabelBox = { x0: Math.min(words[i].x0, social.x0), y0: Math.min(words[i].y0, social.y0), x1: Math.max(words[i].x1, social.x1), y1: Math.max(words[i].y1, social.y1) };
-                } else {
-                    razonLabelBox = { x0: words[i].x0, y0: words[i].y0, x1: words[i].x1, y1: words[i].y1 };
-                }
+// ==================== Detección y agrupado de palabras (helpers) ====================
+function groupWordsIntoRows(words) {
+    if (!Array.isArray(words) || words.length === 0) return [];
+    const sorted = words.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+    const rows = [];
+    const TH = 14; // umbral vertical px
+    for (const w of sorted) {
+        let placed = false;
+        for (const r of rows) {
+            if (Math.abs(r.y - w.cy) <= TH) {
+                r.words.push(w);
+                r.y = (r.y * (r.words.length - 1) + w.cy) / r.words.length;
+                placed = true;
                 break;
             }
         }
-
-        // locate DESCRIPCION label
-        let descrLabelBox = null;
-        for (let i = 0; i < words.length; i++) {
-            const t = normalize(words[i].text);
-            if (t.includes('DESCRIPCION') || t.includes('DESCRIPCIÓN') || t === '5') {
-                const lineY = words[i].cy;
-                const nearby = words.filter(w => Math.abs(w.cy - lineY) < Math.max(12, w.h));
-                let minx = words[i].x0, miny = words[i].y0, maxx = words[i].x1, maxy = words[i].y1;
-                nearby.forEach(n => {
-                    const nt = normalize(n.text);
-                    if (nt && (nt.includes('DESCRIP') || nt.includes('NOMBRE') || nt.includes('RESIDUO') || nt.includes('CARACTER'))) {
-                        minx = Math.min(minx, n.x0); miny = Math.min(miny, n.y0); maxx = Math.max(maxx, n.x1); maxy = Math.max(maxy, n.y1);
-                    }
-                });
-                descrLabelBox = { x0: minx, y0: miny, x1: maxx, y1: maxy };
-                break;
-            }
+        if (!placed) {
+            rows.push({ y: w.cy, words: [Object.assign({}, w)] });
         }
-
-        if (!razonLabelBox && !descrLabelBox) return null;
-
-        const padX = Math.round(imgW * 0.01);
-        const padY = Math.round(imgH * 0.01);
-
-        let razonRect = null;
-        if (razonLabelBox) {
-            const rx0 = Math.max(0, razonLabelBox.x0 - padX);
-            const rx1 = Math.min(imgW, razonLabelBox.x1 + Math.round(imgW * 0.6)); // amplio a la derecha
-            const ry0 = Math.max(0, razonLabelBox.y0 - padY);
-            const ry1 = Math.min(imgH, razonLabelBox.y1 + Math.round(razonLabelBox.h * 1.5) + padY);
-            razonRect = { x: rx0 / imgW, y: ry0 / imgH, w: (rx1 - rx0) / imgW, h: (ry1 - ry0) / imgH };
-        }
-
-        let descrRect = null;
-        if (descrLabelBox) {
-            const dx0 = Math.max(0, descrLabelBox.x0 - padX);
-            const dx1 = Math.min(imgW, dx0 + Math.round(imgW * 0.80));
-            const dy0 = Math.max(0, descrLabelBox.y1 - Math.round(descrLabelBox.h * 0.2));
-            const dy1 = Math.min(imgH, dy0 + Math.round(imgH * 0.25)); // bloque más alto para capturar líneas múltiples
-            descrRect = { x: dx0 / imgW, y: dy0 / imgH, w: (dx1 - dx0) / imgW, h: (dy1 - dy0) / imgH };
-        }
-
-        if (!descrRect && razonLabelBox) {
-            const guessY = Math.min(0.9, (razonLabelBox.y1 / imgH) + 0.06);
-            descrRect = { x: 0.05, y: guessY, w: 0.8, h: 0.20 };
-        }
-
-        function clampRect(r) {
-            if (!r) return r;
-            return { x: Math.max(0, Math.min(1, r.x)), y: Math.max(0, Math.min(1, r.y)), w: Math.max(0.01, Math.min(1, r.w)), h: Math.max(0.01, Math.min(1, r.h)) };
-        }
-
-        return { razonRect: clampRect(razonRect), descrRect: clampRect(descrRect) };
-    } catch (e) {
-        console.warn('detectLabelRectsUsingWords fallo:', e);
-        return null;
     }
+    for (const r of rows) r.words.sort((a, b) => a.x0 - b.x0);
+    return rows;
 }
 
-// ==================== EXTRAER SOLO CAMPOS 4 y 5 (PRINCIPAL) ====================
-async function extractFieldsByCrop(file) {
-    // 1) intentar detectar etiquetas para recortar zonas enfocadas
-    let rects = null;
-    try { rects = await detectLabelRectsUsingWords(file); } catch (e) { console.warn('Detect labels error', e); rects = null; }
+// ==================== Extracción usando palabras y bounding boxes ====================
+async function extractFieldsFromWords(file) {
+    if (!file) return { razonSocial: '', descripcionResiduo: '', debug: {} };
+    if (!tesseractWorker) await inicializarTesseract();
 
-    const { razonRect: defaultRazon, descrRect: defaultDescr } = DEFAULT_RECTS;
-    const razonRect = (rects && rects.razonRect) ? rects.razonRect : defaultRazon;
-    const descrRect = (rects && rects.descrRect) ? rects.descrRect : defaultDescr;
+    try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
+    const res = await tesseractWorker.recognize(file);
+    const wordsRaw = (res && res.data && res.data.words) ? res.data.words : [];
+    if (!wordsRaw || !wordsRaw.length) return { razonSocial: '', descripcionResiduo: '', debug: { error: 'no-words' } };
 
-    let razonText = '';
-    let descrText = '';
-    let fullResult = null;
-
-    // 2) OCR en RAZON: intentar con recorte amplio a la derecha y single line
-    try {
-        razonText = await ocrCrop(file, razonRect, '7');
-        console.log('ocr razonText (crop):', razonText);
-    } catch (e) {
-        console.warn('ocrCrop razon fallo:', e);
-    }
-
-    // 3) OCR en DESCRIPCION: recortar bloque y detectar si header incluido
-    try {
-        // pequeño header check
-        const headerFrac = Math.min(0.08, descrRect.h || 0.06);
-        const headerRect = { x: descrRect.x, y: descrRect.y, w: descrRect.w, h: headerFrac };
-        const headerText = await ocrCrop(file, headerRect, '6');
-        const hasHeader = /DESCRIPCION|DESCRIPCIÓN|DESCRIPCION\s*\(Nombre/i.test(headerText || '');
-        let actualDescrRect = descrRect;
-        if (hasHeader) {
-            const headerH = Math.min((descrRect.h || 0.06), 0.08);
-            actualDescrRect = { x: descrRect.x, y: descrRect.y + headerH, w: descrRect.w, h: Math.max(0.06, descrRect.h - headerH) };
+    const words = wordsRaw.map(w => {
+        let x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        if (w.bbox && typeof w.bbox === 'object') {
+            x0 = w.bbox.x0 || w.bbox.x || w.bbox.left || 0;
+            y0 = w.bbox.y0 || w.bbox.y || w.bbox.top || 0;
+            x1 = w.bbox.x1 || (w.bbox.x0 ? w.bbox.x1 : (w.bbox.x || 0));
+            y1 = w.bbox.y1 || (w.bbox.y0 ? w.bbox.y1 : (w.bbox.y || 0));
+        } else {
+            x0 = w.x0 || w.left || 0;
+            y0 = w.y0 || w.top || 0;
+            x1 = w.x1 || (w.left ? w.left + (w.width || 0) : x0 + (w.width || 0));
+            y1 = w.y1 || (w.top ? w.top + (w.height || 0) : y0 + (w.height || 0));
         }
-        descrText = await ocrCrop(file, actualDescrRect, '6');
-        console.log('ocr descrText (crop):', descrText);
-    } catch (e) {
-        console.warn('ocrCrop descripcion fallo:', e);
+        if (x1 < x0) { const t = x0; x0 = x1; x1 = t; }
+        if (y1 < y0) { const t = y0; y0 = y1; y1 = t; }
+        const text = (w.text || w.word || '').toString().trim();
+        return { text, x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+    }).filter(w => w.text && w.text.length > 0);
+
+    if (!words.length) return { razonSocial: '', descripcionResiduo: '', debug: { error: 'no-words-normalized' } };
+
+    const rows = groupWordsIntoRows(words);
+    const normalizeText = s => (s || '').replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g, ' ').trim().toUpperCase();
+
+    // RAZON SOCIAL
+    let razonRowIdx = -1, razonWordIdx = -1;
+    for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        for (let j = 0; j < r.words.length; j++) {
+            const t = normalizeText(r.words[j].text);
+            if (/\bRAZON\b/.test(t) || /\bRAZÓN\b/.test(t) || /RAZON\s+SOCIAL/.test(t)) {
+                razonRowIdx = i; razonWordIdx = j; break;
+            }
+        }
+        if (razonRowIdx >= 0) break;
     }
 
-    // 4) Si alguno de los campos es corto o parece contener solo el número/etiqueta -> fallback a OCR completo
-    const needFull = (!razonText || razonText.trim().length < 4 || /^\s*4[\.\-]?\s*$/i.test(razonText)) ||
-                     (!descrText || descrText.trim().length < 6 || /^\s*5[\.\-]?\s*$/i.test(descrText));
+    let razonSocial = '';
+    if (razonRowIdx >= 0) {
+        const row = rows[razonRowIdx];
+        let startIndex = razonWordIdx;
+        for (let k = razonWordIdx; k < row.words.length; k++) {
+            const t = normalizeText(row.words[k].text);
+            if (/\bSOCIAL\b/.test(t)) { startIndex = k; break; }
+        }
+        const labelRight = row.words[startIndex].x1;
+        const rightWords = row.words.filter(w => w.cx > labelRight - 2);
+        const filtered = rightWords.map(w => w.text).filter(tt => !/^\-+$/.test(tt) && !/^(DOMICILIO|C\.P|TEL|MUNICIPIO|EDO|CP)$/i.test(tt));
+        razonSocial = filtered.join(' ').trim();
+        if (!razonSocial && row.words.length > startIndex + 1) {
+            razonSocial = row.words.slice(startIndex + 1).map(w => w.text).join(' ').trim();
+        }
+    }
+
+    // DESCRIPCION
+    let descrRowIdx = -1;
+    for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        for (let j = 0; j < r.words.length; j++) {
+            const t = normalizeText(r.words[j].text);
+            if (/\bDESCRIPCION\b/.test(t) || /\bDESCRIPCIÓN\b/.test(t) || /^\s*5\s*$/.test(t)) {
+                descrRowIdx = i; break;
+            }
+        }
+        if (descrRowIdx >= 0) break;
+    }
+
+    let descripcionResiduo = '';
+    if (descrRowIdx >= 0) {
+        const blockLines = [];
+        const stopHeaders = ['CONTENEDOR','CAPACIDAD','TIPO','CANTIDAD','UNIDAD','VOLUMEN','PESO','CAPACIDAD','CAPACIDAD DE RESIDUO'];
+        for (let r = descrRowIdx + 1; r < Math.min(rows.length, descrRowIdx + 6); r++) {
+            const lineText = rows[r].words.map(w => w.text).join(' ').trim();
+            const norm = normalizeText(lineText);
+            if (stopHeaders.some(h => norm.includes(h.replace(/\s+/g,'')) || norm.includes(h))) break;
+            if (/^[\d\W]+$/.test(lineText)) continue;
+            blockLines.push(lineText);
+            if (/MEDICAMENT|RESIDUO|CADUCO|OBSOLETO|EMP[AÁ]QUE|SUSTANCIA|REACTIVO/i.test(lineText)) {
+                if (blockLines.length >= 1) break;
+            }
+        }
+        if (blockLines.length) {
+            descripcionResiduo = blockLines[0];
+            descripcionResiduo = descripcionResiduo.replace(/\b\d+(\.\d+)?\s*(KGS|KGS\.?|KGS:?)\b/ig,'').trim();
+            descripcionResiduo = descripcionResiduo.replace(/[_|~\[\]\{\}]+/g,' ').replace(/\s{2,}/g,' ').trim();
+        }
+    }
+
+    return {
+        razonSocial: razonSocial || '',
+        descripcionResiduo: descripcionResiduo || '',
+        debug: { rowsCount: rows.length, razonRowIdx, descrRowIdx, rowsPreview: rows.slice(0,10).map(r => r.words.map(w => w.text).join(' | ')) }
+    };
+}
+
+// ==================== Extracción principal (combina palabras + crops + fallback) ====================
+async function extractFieldsByCrop(file) {
+    // 1) intentar extracción por palabras
+    let fromWords = { razonSocial: '', descripcionResiduo: '', debug: {} };
+    try {
+        fromWords = await extractFieldsFromWords(file);
+        console.log('DEBUG extractFieldsFromWords:', fromWords.debug);
+    } catch (e) {
+        console.warn('extractFieldsFromWords fallo:', e);
+        fromWords = { razonSocial: '', descripcionResiduo: '', debug: { error: e && e.message } };
+    }
+
+    const okRazon = fromWords.razonSocial && fromWords.razonSocial.trim().length > 3;
+    const okDesc = fromWords.descripcionResiduo && fromWords.descripcionResiduo.trim().length > 4;
+
+    if (okRazon && okDesc) {
+        return {
+            razonSocial: fromWords.razonSocial.trim(),
+            descripcionResiduo: fromWords.descripcionResiduo.trim(),
+            textoOCRCompleto: ''
+        };
+    }
+
+    // 2) fallback con recortes
+    const { razonRect: defaultRazon, descrRect: defaultDescr } = DEFAULT_RECTS;
+    let razonText = '', descrText = '', fullResult = null;
+
+    try {
+        razonText = await ocrCrop(file, defaultRazon, '7');
+        console.log('ocrCrop fallback razonText:', razonText);
+    } catch (e) { console.warn('ocrCrop razon fallback error', e); }
+
+    try {
+        descrText = await ocrCrop(file, defaultDescr, '6');
+        console.log('ocrCrop fallback descrText:', descrText);
+    } catch (e) { console.warn('ocrCrop descr fallback error', e); }
+
+    const needFull = (!okRazon && (!razonText || razonText.trim().length < 4)) ||
+                     (!okDesc && (!descrText || descrText.trim().length < 6));
 
     if (needFull) {
         try {
             fullResult = await ejecutarOCR(file);
-            // guardar texto completo para debugging/uso futuro
             const fullText = (fullResult && fullResult.data && fullResult.data.text) ? fullResult.data.text : '';
-            console.log('OCR completo resultado (primera 800 chars):', (fullText || '').slice(0, 800));
-            // intentar extraer campos numerados usando heurística robusta
+            console.log('OCR completo (fallback) texto inicial:', (fullText || '').slice(0,800));
             const fallback = extractFieldsFromFullText(fullText);
-            if ((!razonText || razonText.trim().length < 4)) razonText = fallback.razonSocial || '';
-            if ((!descrText || descrText.trim().length < 6)) descrText = fallback.descripcionResiduo || '';
+            razonText = razonText && razonText.trim().length ? razonText : (fallback.razonSocial || '');
+            descrText = descrText && descrText.trim().length ? descrText : (fallback.descripcionResiduo || '');
         } catch (e) {
             console.warn('OCR completo fallback fallo:', e);
         }
     }
 
-    // 5) limpiar textos resultantes
-    function cleanLines(raw) {
-        if (!raw) return '';
-        return raw.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean).join(' ');
-    }
-    let razonFinal = (razonText || '').replace(/^\s*4[\.\-\)\:\s]*/i, '').replace(/RAZON SOCIAL.*?:?/i, '').trim();
-    let descripcionFinal = (descrText || '').replace(/^\s*5[\.\-\)\:\s]*/i, '').replace(/DESCRIPCION.*?:?/i, '').trim();
+    const razonFinal = (fromWords.razonSocial && fromWords.razonSocial.trim().length > 2) ? fromWords.razonSocial.trim()
+                      : (razonText ? razonText.replace(/RAZON\s+SOCIAL.*?:?/i,'').trim() : 'Desconocido');
 
-    razonFinal = cleanLines(razonFinal);
-    descripcionFinal = cleanLines(descripcionFinal);
+    let descripcionFinal = (fromWords.descripcionResiduo && fromWords.descripcionResiduo.trim().length > 3) ? fromWords.descripcionResiduo.trim()
+                           : (descrText ? descrText.replace(/DESCRIPCION.*?:?/i,'').trim() : 'Desconocido');
 
-    // last-resort defaults if still empty
-    if (!razonFinal) razonFinal = 'Desconocido';
-    if (!descripcionFinal) descripcionFinal = 'Desconocido';
+    descripcionFinal = descripcionFinal.split(/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
+    descripcionFinal = descripcionFinal.replace(/^\s*[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?\b/i,'').trim();
 
     return {
-        razonSocial: razonFinal,
-        descripcionResiduo: descripcionFinal,
+        razonSocial: razonFinal || 'Desconocido',
+        descripcionResiduo: descripcionFinal || 'Desconocido',
         textoOCRCompleto: (fullResult && fullResult.data && fullResult.data.text) ? fullResult.data.text : ''
     };
 }
 
-// ==================== EXTRACCIÓN POR REGEX SOBRE OCR COMPLETO (heurística robusta) ====
+// ==================== Extracción por texto completo (fallback heurístico) ====================
 function extractFieldsFromFullText(fullText) {
     const salida = { razonSocial: '', descripcionResiduo: '' };
-    if (!fullText || !fullText.trim()) return salida;
-    const text = fullText.replace(/\r/g, '\n');
+    if (!fullText) return salida;
+    const lines = fullText.replace(/\r/g,'\n').split('\n').map(l => l.trim()).filter(Boolean);
 
-    // Normalize lines: collapse multiple blank lines
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-
-    // Heurística 1: buscar líneas que contengan "4" o "RAZON SOCIAL"
     for (let i = 0; i < lines.length; i++) {
         const ln = lines[i];
         if (/^\s*4\W|RAZON\s+SOCIAL/i.test(ln)) {
-            // intentar extraer lo que hay después del ":" o a la derecha
-            const afterColon = ln.split(/[:\-]\s*/).slice(1).join(':').trim();
-            if (afterColon && afterColon.length > 2) {
-                salida.razonSocial = afterColon;
-                break;
-            } else if (lines[i + 1]) {
-                // siguiente línea suele contener el valor
-                salida.razonSocial = lines[i + 1];
-                break;
-            } else {
-                // fallback: extraer todo lo que quede en la misma línea sin la etiqueta
-                salida.razonSocial = ln.replace(/^\s*4\W*|RAZON\s+SOCIAL.*?:?/i, '').trim();
-                break;
-            }
+            let after = ln.replace(/^\s*4\W*|RAZON\s+SOCIAL.*?:?/i,'').trim();
+            if (after && after.length > 2) salida.razonSocial = after;
+            else if (lines[i+1]) salida.razonSocial = lines[i+1].trim();
+            break;
         }
     }
 
-    // Heurística 2: buscar "5" o "DESCRIPCION"
     for (let i = 0; i < lines.length; i++) {
         const ln = lines[i];
         if (/^\s*5\W|DESCRIPCION/i.test(ln)) {
-            const afterColon = ln.split(/[:\-]\s*/).slice(1).join(':').trim();
-            if (afterColon && afterColon.length > 4) {
-                salida.descripcionResiduo = afterColon;
-                // también juntar siguientes líneas hasta un header (CONTENEDOR|CAPACIDAD|CANTIDAD)
-                let j = i + 1;
-                while (j < lines.length && !/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD/i.test(lines[j])) {
-                    salida.descripcionResiduo += ' ' + lines[j];
-                    j++;
-                    if (j - i > 4) break;
-                }
-                salida.descripcionResiduo = salida.descripcionResiduo.trim();
-                break;
-            } else if (lines[i + 1]) {
-                // next lines likely contain description lines
-                let collected = [];
-                let j = i + 1;
-                while (j < lines.length && !/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD/i.test(lines[j])) {
-                    if (lines[j].length > 2) collected.push(lines[j]);
-                    j++;
-                    if (collected.length >= 4) break;
-                }
-                salida.descripcionResiduo = collected.join(' ').trim();
-                break;
-            } else {
-                salida.descripcionResiduo = ln.replace(/^\s*5\W*|DESCRIPCION.*?:?/i, '').trim();
-                break;
+            let collected = [];
+            let j = i + 1;
+            while (j < lines.length) {
+                const l2 = lines[j];
+                if (/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i.test(l2)) break;
+                if (!/^[\d\W]{1,}$/.test(l2)) collected.push(l2);
+                if (collected.length >= 3) break;
+                j++;
             }
+            if (collected.length) salida.descripcionResiduo = collected[0].replace(/^\s*[\-\–\:\.0-9]+/,'').trim();
+            else {
+                let after = ln.replace(/^\s*5\W*|DESCRIPCION.*?:?/i,'').trim();
+                salida.descripcionResiduo = after || '';
+            }
+            break;
         }
     }
 
-    // Extra fallback: si no encontramos mediante numeración, buscar por texto "RAZON SOCIAL" y "DESCRIPCION" en cualquier parte
-    if (!salida.razonSocial) {
-        const m = text.match(/RAZON\s+SOCIAL[^\n\r]*[:\-]?\s*([^\n\r]+)/i);
-        if (m && m[1]) salida.razonSocial = m[1].trim();
-    }
-    if (!salida.descripcionResiduo) {
-        const m2 = text.match(/DESCRIPCION[^\n\r]*[:\-]?\s*([^\n\r]+)/i);
-        if (m2 && m2[1]) salida.descripcionResiduo = m2[1].trim();
-    }
-
-    // final trimming
-    salida.razonSocial = (salida.razonSocial || '').replace(/\s{2,}/g, ' ').trim();
-    salida.descripcionResiduo = (salida.descripcionResiduo || '').replace(/\s{2,}/g, ' ').trim();
+    salida.razonSocial = (salida.razonSocial || '').replace(/\s{2,}/g,' ').trim();
+    salida.descripcionResiduo = (salida.descripcionResiduo || '').replace(/\s{2,}/g,' ').replace(/^[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?/i,'').trim();
     return salida;
 }
 
-// ==================== Matching avanzado simplificado (se mantiene similar) ====================
-function normalizeForMatch(s) { return normalizeForCompare(s).toUpperCase(); }
-function tokenizeWords(s) { if (!s) return []; return s.toUpperCase().replace(/[^A-Z0-9ÑÁÉÍÓÚ\s]/g,' ').split(/\s+/).filter(Boolean); }
-function tokenIntersectionScore(a,b) { if (!a.length||!b.length) return 0; const setB=new Set(b); let c=0; for(const t of a) if(setB.has(t)) c++; return c/Math.max(a.length,b.length); }
-function levenshtein(a,b){ a=a||'';b=b||'';const al=a.length, bl=b.length; if(al===0)return bl; if(bl===0)return al; let prev=new Array(bl+1); for(let j=0;j<=bl;j++)prev[j]=j; for(let i=1;i<=al;i++){ let cur=[i]; for(let j=1;j<=bl;j++){ const cost = a[i-1]===b[j-1]?0:1; cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);} prev=cur;} return prev[bl]; }
-function similarityNormalized(a,b){ if(!a&&!b) return 1; if(!a||!b) return 0; const d=levenshtein(a,b); return 1 - (d/Math.max(a.length,b.length)); }
-function containsAsWord(targetNorm, candidateNorm){ if(!targetNorm||!candidateNorm) return false; const esc=candidateNorm.replace(/[-\/\\^$*+?.()|[\]{}]/g,'\\$&'); const rx=new RegExp('\\b'+esc+'\\b','i'); return rx.test(targetNorm); }
+// ==================== Matching avanzado (helpers) ====================
+function levenshtein(a, b) {
+    a = a || ''; b = b || '';
+    const al = a.length, bl = b.length;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+    let prev = new Array(bl + 1);
+    for (let j = 0; j <= bl; j++) prev[j] = j;
+    for (let i = 1; i <= al; i++) {
+        let cur = [i];
+        for (let j = 1; j <= bl; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+        }
+        prev = cur;
+    }
+    return prev[bl];
+}
+function similarityNormalized(a, b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    const dist = levenshtein(a, b);
+    const maxLen = Math.max(a.length, b.length);
+    if (maxLen === 0) return 1;
+    return 1 - (dist / maxLen);
+}
+function tokenizeWordsForMatch(s) {
+    if (!s) return [];
+    return s.toUpperCase().replace(/[^A-Z0-9ÑÁÉÍÓÚ\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+function tokenIntersectionScore(tokensA, tokensB) {
+    if (!tokensA.length || !tokensB.length) return 0;
+    const setB = new Set(tokensB);
+    let common = 0;
+    for (const t of tokensA) if (setB.has(t)) common++;
+    return common / Math.max(tokensA.length, tokensB.length);
+}
+function containsAsWord(targetNorm, candidateNorm) {
+    if (!targetNorm || !candidateNorm) return false;
+    const esc = candidateNorm.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const rx = new RegExp('\\b' + esc + '\\b', 'i');
+    return rx.test(targetNorm);
+}
 function matchResiduoHeuristic(resTarget, residuoMaster) {
-    if(!resTarget||!residuoMaster) return false;
-    if(containsAsWord(resTarget, residuoMaster)) return true;
-    if(resTarget.includes(residuoMaster) || residuoMaster.includes(resTarget)) return true;
-    const tA=tokenizeWords(resTarget), tB=tokenizeWords(residuoMaster);
-    if(tokenIntersectionScore(tA,tB)>=0.45) return true;
-    if(similarityNormalized(resTarget, residuoMaster)>=0.72) return true;
+    if (!resTarget || !residuoMaster) return false;
+    if (containsAsWord(resTarget, residuoMaster)) return true;
+    if (resTarget.includes(residuoMaster) || residuoMaster.includes(resTarget)) return true;
+    const tA = tokenizeWordsForMatch(resTarget);
+    const tB = tokenizeWordsForMatch(residuoMaster);
+    const tokenScore = tokenIntersectionScore(tA, tB);
+    if (tokenScore >= 0.45) return true;
+    const sim = similarityNormalized(resTarget, residuoMaster);
+    if (sim >= 0.72) return true;
     return false;
 }
+function normForMatching(s) { return normalizeForCompare(s || '').toUpperCase(); }
 
-// ==================== verificarContraListaMaestra (igual con heurística) ====================
+// ==================== verificarContraListaMaestra (mejorada) ====================
 function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     const resultado = { esAceptable: true, coincidencias: [], motivo: '', nivelRiesgo: 'bajo', accionesRecomendadas: [] };
-    const genTargetNorm = normalizeForMatch(razonSocial);
-    const resTargetNorm = normalizeForMatch(descripcionResiduo);
+    const genTargetNorm = normForMatching(razonSocial);
+    const resTargetNorm = normForMatching(descripcionResiduo);
 
-    function pushCoin(tipo, valor, estado, motivo) { resultado.coincidencias.push({ tipo, valor, estado, motivo }); }
+    function pushCoin(tipo, valor, estado, motivo) {
+        resultado.coincidencias.push({ tipo, valor, estado, motivo });
+    }
 
+    // palabras peligrosas
     if (descripcionResiduo) {
-        const descTokens = tokenizeWords(descripcionResiduo);
+        const descTokens = tokenizeWordsForMatch(descripcionResiduo);
         for (const p of PALABRAS_PELIGROSAS) {
-            const pNorm = normalizeForMatch(p);
+            const pNorm = normForMatching(p);
             if (resTargetNorm && containsAsWord(resTargetNorm, pNorm)) {
                 resultado.esAceptable = false;
                 resultado.motivo = `❌ RECHAZADO: Se detectó término peligroso "${p}" en la descripción.`;
@@ -487,7 +501,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
                 resultado.coincidencias.push({ tipo: 'palabra_peligrosa', valor: p, estado: 'rechazado_automatico', motivo: 'Palabra peligrosa detectada' });
                 resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar clasificaciones.'];
             } else {
-                const tP = tokenizeWords(p);
+                const tP = tokenizeWordsForMatch(p);
                 if (tokenIntersectionScore(descTokens, tP) >= 0.7) {
                     resultado.esAceptable = false;
                     resultado.motivo = `❌ RECHAZADO: Posible término peligroso detectado ("${p}").`;
@@ -500,7 +514,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     }
 
     for (const item of LISTA_MAESTRA) {
-        const genNorm = normalizeForMatch(item.generador || '');
+        const genNorm = normForMatching(item.generador || '');
         if (genNorm) {
             if (genTargetNorm && (genTargetNorm.includes(genNorm) || genNorm.includes(genTargetNorm) || genTargetNorm === genNorm || similarityNormalized(genTargetNorm, genNorm) > 0.82)) {
                 pushCoin('generador', item.generador, item.estado, item.motivo);
@@ -517,10 +531,11 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
                 }
             }
         }
+
         const residuos = Array.isArray(item.residuos) ? item.residuos : [item.residuos];
         for (const res of residuos) {
             if (!res) continue;
-            const resNorm = normalizeForMatch(res);
+            const resNorm = normForMatching(res);
             if (!resNorm) continue;
             if (matchResiduoHeuristic(resTargetNorm, resNorm)) {
                 pushCoin('residuo_especifico', res, item.estado, item.motivo);
@@ -543,7 +558,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     return resultado;
 }
 
-// ==================== main flow iniciarAnalisis ====================
+// ==================== FUNCIÓN PRINCIPAL: iniciarAnalisis ====================
 async function iniciarAnalisis() {
     if (!currentImage) { safeMostrarError('Sube o captura la imagen primero.'); return; }
 
@@ -664,7 +679,6 @@ function mostrarResultadosEnInterfaz(resultado) {
     }
     if (verificationContent) verificationContent.innerHTML = detallesHTML;
 
-    // Mostrar texto OCR completo en consola para debugging (no en UI por defecto)
     console.log('Texto OCR completo (primera 1000 chars):', (resultado.textoOriginal || '').slice(0, 1000));
 }
 
