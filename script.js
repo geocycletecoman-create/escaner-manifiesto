@@ -184,7 +184,7 @@ function groupWordsIntoRows(words) {
   return rows;
 }
 
-// ==================== EXTRACCIÓN: prioridad palabras + fallbacks ====================
+// ==================== EXTRACCIÓN: prioridad palabras + mejoras para campo 4 ====================
 async function extractFieldsByCrop(file) {
   let razon = '', descripcion = '', fullText = '';
   try {
@@ -216,19 +216,69 @@ async function extractFieldsByCrop(file) {
     const rows = groupWordsIntoRows(words);
     console.log('DEBUG rowsPreview:', rows.slice(0,20).map(r => r.words.map(w=>w.text).join(' | ')));
 
-    // 1) Buscar empresa (campo 4) preferentemente mediante patterns en fullText
+    // --- MEJOR EXTRACCIÓN DE RAZÓN SOCIAL (campo 4) ---
+    // Strategy:
+    // 1) Try strict regex: "4.- RAZON SOCIAL ... : value" on full text
+    // 2) If found but value looks like a manifest number (contains EV-, many digits/slashes), ignore and try next
+    // 3) If not found, look for "RAZON SOCIAL" occurrence(s) and take text after colon or the following non-empty line
+    // 4) If still not found, search LISTA_MAESTRA names in fullText (best-effort)
     let companyFound = '';
     const fullUpper = (fullText || '').replace(/\r/g,'\n');
 
-    let m = fullUpper.match(/4\W{0,3}[-\.\)]?\s*RAZON\s+SOCIAL[^\n\r]*[:\-\s]{1,}\s*([^\n\r]+)/i);
-    if (m && m[1] && m[1].trim().length>2) {
+    // helper to detect manifest-like tokens (reject as company)
+    const isManifestLike = s => {
+      if (!s) return false;
+      const t = s.toUpperCase();
+      // patterns: EV-..., sequences with many slashes/dates, "NO. DE MANIFIESTO", etc.
+      if (/EV-\d+/.test(t)) return true;
+      if (/\bNO\.\s*DE\s*MANIFIESTO\b/.test(t)) return true;
+      if (/\d{2}\/\d{2}\/\d{2,4}/.test(t)) return true;
+      if (/[0-9]{3,}[\-\/][0-9]{2,}/.test(t)) return true;
+      // if string is mostly digits and punctuation
+      const letters = (s.match(/[A-ZÁÉÍÓÚÑ]/gi) || []).length;
+      const digits = (s.match(/\d/g) || []).length;
+      if (digits > letters && digits > 2) return true;
+      return false;
+    };
+
+    // 1) strict regex: label and value same line
+    let m = fullUpper.match(/4\W{0,3}[-\.\)]?\s*RAZON\s+SOCIAL(?:\s+DE\s+LA\s+EMPRESA)?[^\n\r]*[:\-\s]{1,}\s*([^\n\r]+)/i);
+    if (m && m[1] && m[1].trim().length>2 && !isManifestLike(m[1])) {
       companyFound = m[1].trim();
     } else {
-      m = fullUpper.match(/RAZON\s+SOCIAL[^\n\r]*[:\-\s]{0,}\s*([^\n\r]*)/i);
-      if (m && m[1] && m[1].trim().length>2) {
-        companyFound = m[1].trim();
-      } else {
-        // buscar en rows
+      // 2) search all occurrences of "RAZON SOCIAL" and try to take the right value (same line after ':' or next non-empty line)
+      const lines = fullUpper.split('\n');
+      for (let i=0;i<lines.length;i++) {
+        if (/RAZON\s+SOCIAL/i.test(lines[i])) {
+          // try to extract after the label in same line
+          const after = lines[i].replace(/RAZON\s+SOCIAL(?:\s+DE\s+LA\s+EMPRESA)?/i,'').replace(/^[\:\-\.\s]+/,'').trim();
+          if (after && !isManifestLike(after) && after.length>2) { companyFound = after; break; }
+          // else try next few lines to find a plausible company (non-manifest-like, contains letters)
+          for (let j = i+1; j <= Math.min(i+3, lines.length-1); j++) {
+            const cand = lines[j].trim();
+            if (!cand) continue;
+            if (!isManifestLike(cand)) { companyFound = cand; break; }
+            // otherwise continue trying
+          }
+          if (companyFound) break;
+        }
+      }
+
+      // 3) If still not found, check if any master list generator appears in fullText
+      if (!companyFound) {
+        const normFull = normalizeForCompare(fullUpper);
+        for (const item of LISTA_MAESTRA) {
+          const genNorm = normalizeForCompare(item.generador || '');
+          if (genNorm && normFull.includes(genNorm)) {
+            companyFound = item.generador;
+            break;
+          }
+        }
+      }
+
+      // 4) If still empty, fallback to scanning rows near header but avoid picking manifest numbers
+      if (!companyFound) {
+        // locate possible label "RAZON" in rows
         let razonRowIdx = -1, razonWordIdx = -1;
         for (let i=0;i<rows.length;i++) {
           for (let j=0;j<rows[i].words.length;j++) {
@@ -246,19 +296,17 @@ async function extractFieldsByCrop(file) {
           }
           const labelRight = row.words[startIdx].x1;
           const rightWords = row.words.filter(w => w.cx > labelRight - 2);
-          companyFound = rightWords.map(w=>w.text).join(' ').trim();
-          if (!companyFound && row.words.length > startIdx+1) companyFound = row.words.slice(startIdx+1).map(w=>w.text).join(' ').trim();
+          const candidate = rightWords.map(w=>w.text).join(' ').trim();
+          if (candidate && !isManifestLike(candidate)) companyFound = candidate;
         }
       }
     }
 
-    // fallback small regex if still empty
-    if (!companyFound) {
-      m = fullUpper.match(/4\W{0,3}[-\.\)]?\s*[:\-\s]*([^\n\r]+)/i);
-      if (m && m[1]) companyFound = m[1].trim();
-    }
+    // Final cleaning and mapping to master list
+    const cleanCompany = (companyFound || '').replace(/\s{2,}/g,' ').replace(/^[\-\:\.]+/,'').trim();
+    const finalCompany = matchCompanyToMaster(cleanCompany) || cleanCompany || 'Desconocido';
 
-    // 2) Buscar descripcion (campo 5) -> preferir la línea inmediatamente debajo de la etiqueta
+    // --- DESCRIPCION (campo 5) ---
     let descFound = '';
     let mm = fullUpper.match(/5\W{0,3}[-\.\)]?\s*DESCRIPCION[^\n\r]*[:\-\s]{0,}\s*([^\n\r]*)/i);
     if (mm && mm[1] && mm[1].trim().length>3) {
@@ -296,11 +344,16 @@ async function extractFieldsByCrop(file) {
       }
     }
 
-    // 3) Fallbacks recortados si campos vacíos
-    if (!companyFound || companyFound.length < 3) {
+    // Fallback recortes si vacío
+    if (!finalCompany || finalCompany === 'Desconocido') {
       try {
         const razonCrop = await ocrCrop(file, DEFAULT_RECTS.razonRect, '7');
-        if (razonCrop && razonCrop.trim().length>2) companyFound = razonCrop.replace(/RAZON\s+SOCIAL.*?:?/i,'').trim();
+        if (razonCrop && razonCrop.trim().length>2) {
+          const cand = razonCrop.replace(/RAZON\s+SOCIAL.*?:?/i,'').trim();
+          if (cand && !/^\s*EV-|^\s*\d{2}\/\d{2}\/\d{2,4}/.test(cand)) {
+            finalCompany = matchCompanyToMaster(cand) || cand;
+          }
+        }
       } catch (e) { console.warn('fallback razonCrop fail', e); }
     }
     if (!descFound || descFound.length < 3) {
@@ -312,21 +365,17 @@ async function extractFieldsByCrop(file) {
       } catch (e) { console.warn('fallback descrCrop fail', e); }
     }
 
-    // cleaning
-    const cleanCompany = (companyFound || '').replace(/\s{2,}/g,' ').replace(/^[\-\:\.]+/,'').trim();
-    let cleanDesc = (descFound || '').replace(/\s{2,}/g,' ').replace(/^[\-\:\.]+/,'').trim();
-
+    // Cleaning desc
+    let cleanDesc = (descFound || '').replace(/\s{2,}/g,' ').trim();
     cleanDesc = cleanDesc.split(/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
     cleanDesc = cleanDesc.replace(/^\s*[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?\b/i,'').trim();
-    const finalCompany = matchCompanyToMaster(cleanCompany) || cleanCompany || 'Desconocido';
-    const finalDesc = (cleanDesc && cleanDesc.length>0) ? cleanDesc : 'Desconocido';
 
     console.log('DEBUG extracted raw company:', companyFound);
-    console.log('DEBUG extracted raw desc:', descFound);
     console.log('DEBUG finalCompany (after mapping):', finalCompany);
-    console.log('DEBUG finalDesc:', finalDesc);
+    console.log('DEBUG extracted raw desc:', descFound);
+    console.log('DEBUG finalDesc:', cleanDesc || 'Desconocido');
 
-    return { razonSocial: finalCompany, descripcionResiduo: finalDesc, textoOCRCompleto: fullText || '' };
+    return { razonSocial: finalCompany || 'Desconocido', descripcionResiduo: cleanDesc || 'Desconocido', textoOCRCompleto: fullText || '' };
 
   } catch (err) {
     console.warn('extractFieldsByCrop error, fallback to full OCR', err);
@@ -550,8 +599,6 @@ async function iniciarAnalisis() {
 }
 
 // ==================== CAMARA / CAPTURA / FILE HANDLERS ====================
-// Declaramos como function declarations (hoisted) para que existan al registrar listeners
-
 async function openCamera() {
   try {
     if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
@@ -570,7 +617,6 @@ async function openCamera() {
     if (fileInput) fileInput.click();
   }
 }
-
 function closeCamera() {
   if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
   cameraStream = null;
@@ -579,7 +625,6 @@ function closeCamera() {
   if (cameraView) cameraView.style.display = 'none';
   if (imagePreview) imagePreview.style.display = 'flex';
 }
-
 function captureFromCamera() {
   const video = document.getElementById('cameraStream');
   if (!video) return;
@@ -599,7 +644,6 @@ function captureFromCamera() {
     if (processBtn) processBtn.disabled = false;
   }, 'image/jpeg', 0.9);
 }
-
 function handleFileSelect(event) {
   const file = (event.target && event.target.files && event.target.files[0]) || null;
   if (!file) return;
@@ -647,41 +691,3 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('Script cargado: listo para validar manifiestos');
-
-// ==================== Funciones auxiliares para incidencias/reportes (resumidas) ====================
-function registrarIncidencia() {
-  if (!ultimoResultado) { alert('No hay resultado para registrar.'); return; }
-  const notasEl = document.getElementById('incidenceNotes');
-  const assignedEl = document.getElementById('assignedTo');
-  const notas = notasEl ? notasEl.value.trim() : '';
-  const asignadoA = assignedEl ? assignedEl.value.trim() : 'No asignado';
-  if (!notas) { alert('Ingrese observaciones.'); if (notasEl) notasEl.focus(); return; }
-  const incidenciaId = 'INC-' + Date.now().toString().slice(-8);
-  const incidencia = { id: incidenciaId, fecha: new Date().toLocaleString(), notas, asignadoA, resultadoAnalisis: ultimoResultado, estado: 'registrada', prioridad: (ultimoResultado && ultimoResultado.nivelRiesgo === 'alto') ? 'alta' : 'media' };
-  historialIncidencias.push(incidencia);
-  try { localStorage.setItem('historialIncidencias', JSON.stringify(historialIncidencias)); } catch (e) { console.warn('No se pudo guardar historial', e); }
-  const form = document.querySelector('.incidence-form'); if (form) form.style.display = 'none';
-  const confirmationDiv = document.getElementById('incidenceConfirmation'); const confirmationMessage = document.getElementById('confirmationMessage');
-  if (confirmationMessage) confirmationMessage.innerHTML = `Incidencia registrada: <strong>${incidenciaId}</strong>`;
-  if (confirmationDiv) confirmationDiv.style.display = 'block';
-}
-function descargarReporteCompleto() {
-  if (!ultimoResultado) { alert('No hay resultado para descargar.'); return; }
-  const contenido = generarReporteCompleto(ultimoResultado);
-  const blob = new Blob([contenido], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `reporte_manifiesto_${ultimoResultado.idAnalisis}.txt`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-}
-function generarReporteCompleto(resultado) {
-  return `REPORTE ANALISIS\nID: ${resultado.idAnalisis}\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\nMotivo: ${resultado.motivo}\nTexto OCR:\n${resultado.textoOriginal}\n`;
-}
-function reiniciarEscaneo() {
-  currentImage = null; ultimoResultado = null;
-  const imagePreview = document.getElementById('imagePreview');
-  if (imagePreview) imagePreview.innerHTML = `<p style="color:#94a3b8"><i class="bi bi-image" style="font-size:2rem"></i> No hay imagen seleccionada</p>`;
-  const processBtn = document.getElementById('processBtn'); if (processBtn) processBtn.disabled = true;
-  const processingCard = document.querySelector('.processing-card'); if (processingCard) processingCard.style.display = 'none';
-  const resultsCard = document.querySelector('.results-card'); if (resultsCard) resultsCard.style.display = 'none';
-  const firstCard = document.querySelector('.card:first-of-type'); if (firstCard) firstCard.style.display = 'block';
-  closeCamera();
-}
