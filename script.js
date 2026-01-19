@@ -141,7 +141,7 @@ async function ejecutarOCR(imagen) {
     }
 }
 
-// ==================== HELPERS: file->image y crop -> blob ====================
+// ==================== HELPERS: convertir file a image y crop -> blob ====================
 function fileToImage(file) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
@@ -165,29 +165,35 @@ function cropImageToBlob(img, rect, quality = 0.95) {
         canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality);
     });
 }
+
 async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
     if (!fileOrBlob) throw new Error('No hay imagen para OCR por región');
     if (!tesseractWorker) await inicializarTesseract();
+
     const img = await fileToImage(fileOrBlob);
     const cropBlob = await cropImageToBlob(img, rectPercent, 0.95);
     if (!cropBlob) return '';
-    try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: psm }); } catch (e) {}
+
+    try {
+        try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: psm }); } catch (e) {}
+    } catch (e) {}
+
     const result = await tesseractWorker.recognize(cropBlob);
     return (result && result.data && result.data.text) ? result.data.text.trim() : '';
 }
 
-// ==================== DEFAULT RECTS (fallback) ====================
+// ==================== DEFAULT RECTS (fallback si no detecta etiquetas) ====================
 const DEFAULT_RECTS = {
     razonRect: { x: 0.05, y: 0.18, w: 0.90, h: 0.09 },
     descrRect: { x: 0.05, y: 0.30, w: 0.80, h: 0.20 }
 };
 
-// ==================== Detección y agrupado de palabras (helpers) ====================
+// ==================== DETECCIÓN Y AGRUPADO DE PALABRAS ====================
 function groupWordsIntoRows(words) {
     if (!Array.isArray(words) || words.length === 0) return [];
     const sorted = words.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx);
     const rows = [];
-    const TH = 14; // umbral vertical px
+    const TH = 14; // umbral vertical en px para agrupar en misma línea (ajustable)
     for (const w of sorted) {
         let placed = false;
         for (const r of rows) {
@@ -206,7 +212,7 @@ function groupWordsIntoRows(words) {
     return rows;
 }
 
-// ==================== Extracción usando palabras y bounding boxes ====================
+// ==================== EXTRACT: versión mejorada (toma la línea inmediata) ====================
 async function extractFieldsFromWords(file) {
     if (!file) return { razonSocial: '', descripcionResiduo: '', debug: {} };
     if (!tesseractWorker) await inicializarTesseract();
@@ -240,7 +246,7 @@ async function extractFieldsFromWords(file) {
     const rows = groupWordsIntoRows(words);
     const normalizeText = s => (s || '').replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g, ' ').trim().toUpperCase();
 
-    // RAZON SOCIAL
+    // --- RAZON SOCIAL (similar a antes) ---
     let razonRowIdx = -1, razonWordIdx = -1;
     for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
@@ -270,7 +276,7 @@ async function extractFieldsFromWords(file) {
         }
     }
 
-    // DESCRIPCION
+    // --- DESCRIPCION: tomar la LÍNEA INMEDIATAMENTE DEBAJO de la etiqueta 5 ---
     let descrRowIdx = -1;
     for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
@@ -285,23 +291,30 @@ async function extractFieldsFromWords(file) {
 
     let descripcionResiduo = '';
     if (descrRowIdx >= 0) {
-        const blockLines = [];
-        const stopHeaders = ['CONTENEDOR','CAPACIDAD','TIPO','CANTIDAD','UNIDAD','VOLUMEN','PESO','CAPACIDAD','CAPACIDAD DE RESIDUO'];
-        for (let r = descrRowIdx + 1; r < Math.min(rows.length, descrRowIdx + 6); r++) {
-            const lineText = rows[r].words.map(w => w.text).join(' ').trim();
+        const stopHeaders = ['CONTENEDOR','CAPACIDAD','TIPO','CANTIDAD','UNIDAD','VOLUMEN','PESO','CAPACIDAD DE RESIDUO'];
+        let candidateIdx = descrRowIdx + 1;
+        while (candidateIdx < rows.length) {
+            const lineText = rows[candidateIdx].words.map(w => w.text).join(' ').trim();
             const norm = normalizeText(lineText);
-            if (stopHeaders.some(h => norm.includes(h.replace(/\s+/g,'')) || norm.includes(h))) break;
-            if (/^[\d\W]+$/.test(lineText)) continue;
-            blockLines.push(lineText);
-            if (/MEDICAMENT|RESIDUO|CADUCO|OBSOLETO|EMP[AÁ]QUE|SUSTANCIA|REACTIVO/i.test(lineText)) {
-                if (blockLines.length >= 1) break;
+            if (stopHeaders.some(h => norm.includes(h.replace(/\s+/g,'')) || norm.includes(h))) { candidateIdx++; continue; }
+            if (/^[\d\W]+$/.test(lineText)) { candidateIdx++; continue; }
+            if (/RAZON\s+SOCIAL|MANIFIESTO|REGISTRO AMBIENTAL|NO\.\s*DE\s*MANIFIESTO/i.test(lineText)) { candidateIdx++; continue; }
+            descripcionResiduo = lineText;
+            if (descripcionResiduo.length < 6 && (candidateIdx + 1) < rows.length) {
+                const nextLine = rows[candidateIdx + 1].words.map(w => w.text).join(' ').trim();
+                if (nextLine && !stopHeaders.some(h => normalizeText(nextLine).includes(h.replace(/\s+/g,'')))) {
+                    descripcionResiduo = (descripcionResiduo + ' ' + nextLine).trim();
+                }
             }
+            break;
         }
-        if (blockLines.length) {
-            descripcionResiduo = blockLines[0];
-            descripcionResiduo = descripcionResiduo.replace(/\b\d+(\.\d+)?\s*(KGS|KGS\.?|KGS:?)\b/ig,'').trim();
-            descripcionResiduo = descripcionResiduo.replace(/[_|~\[\]\{\}]+/g,' ').replace(/\s{2,}/g,' ').trim();
-        }
+    }
+
+    // limpieza final
+    if (descripcionResiduo) {
+        descripcionResiduo = descripcionResiduo.split(/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
+        descripcionResiduo = descripcionResiduo.replace(/^\s*[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?\b/i,'').trim();
+        descripcionResiduo = descripcionResiduo.replace(/[_\[\]\{\}\|]+/g,' ').replace(/\s{2,}/g,' ').trim();
     }
 
     return {
@@ -311,13 +324,15 @@ async function extractFieldsFromWords(file) {
     };
 }
 
-// ==================== Extracción principal (combina palabras + crops + fallback) ====================
+// ==================== Fallback: EXTRACT por recortes y OCR completo ====================
 async function extractFieldsByCrop(file) {
-    // 1) intentar extracción por palabras
+    // 1) intentar extracción por palabras (más precisa)
     let fromWords = { razonSocial: '', descripcionResiduo: '', debug: {} };
     try {
         fromWords = await extractFieldsFromWords(file);
         console.log('DEBUG extractFieldsFromWords:', fromWords.debug);
+        // Exponer rects/rows para debug si deseas
+        window.lastExtractDebug = fromWords.debug;
     } catch (e) {
         console.warn('extractFieldsFromWords fallo:', e);
         fromWords = { razonSocial: '', descripcionResiduo: '', debug: { error: e && e.message } };
@@ -380,7 +395,7 @@ async function extractFieldsByCrop(file) {
     };
 }
 
-// ==================== Extracción por texto completo (fallback heurístico) ====================
+// ==================== EXTRACCIÓN POR TEXTO COMPLETO (FALLBACK HEURÍSTICO) ====================
 function extractFieldsFromFullText(fullText) {
     const salida = { razonSocial: '', descripcionResiduo: '' };
     if (!fullText) return salida;
@@ -422,7 +437,7 @@ function extractFieldsFromFullText(fullText) {
     return salida;
 }
 
-// ==================== Matching avanzado (helpers) ====================
+// ==================== MATCHING AVANZADO (helpers) ====================
 function levenshtein(a, b) {
     a = a || ''; b = b || '';
     const al = a.length, bl = b.length;
