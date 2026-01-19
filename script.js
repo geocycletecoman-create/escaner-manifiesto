@@ -1,3 +1,4 @@
+// ==================== LISTA MAESTRA y CONFIGS ====================
 const LISTA_MAESTRA = [
     { generador: "SYNTHON MEXICO SA DE CV", residuos: ["MEDICAMENTO CADUCO Y OBSOLETO Y EMPAQUE PRIMARIO"], estado: "requiere_permiso_especial", motivo: "Ingreso aceptable" },
     { generador: "RELLENO VILLA DE ALVAREZ", residuos: ["RSU", "Llantas Usadas"], estado: "requiere_permiso_especial", motivo: "Ingreso aceptable" },
@@ -12,7 +13,7 @@ const PALABRAS_PELIGROSAS = [
 ];
 
 // ==================== GLOBALES ====================
-let currentImage = null;       // File/Blob
+let currentImage = null;       // File/Blob actual
 let tesseractWorker = null;    // worker global
 let cameraStream = null;
 let ultimoResultado = null;
@@ -121,7 +122,7 @@ function closeCamera() {
 async function inicializarTesseract() {
     try {
         if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js no encontrado');
-        tesseractWorker = await Tesseract.createWorker({ logger: m => console.log('Tesseract:', m) });
+        tesseractWorker = await Tesseract.createWorker({ logger: m => { /* opcional: mostrar progreso */ } });
         await tesseractWorker.loadLanguage('spa');
         await tesseractWorker.initialize('spa');
         try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
@@ -144,7 +145,7 @@ async function ejecutarOCR(imagen) {
     }
 }
 
-// ==================== HELPERS: convertir file a image y crop -> blob ====================
+// ==================== HELPERS: file->image y crop -> blob ====================
 function fileToImage(file) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
@@ -158,8 +159,8 @@ function cropImageToBlob(img, rect, quality = 0.95) {
     const canvas = document.createElement('canvas');
     const sx = Math.round(rect.x * img.naturalWidth);
     const sy = Math.round(rect.y * img.naturalHeight);
-    const sw = Math.round(rect.w * img.naturalWidth);
-    const sh = Math.round(rect.h * img.naturalHeight);
+    const sw = Math.max(1, Math.round(rect.w * img.naturalWidth));
+    const sh = Math.max(1, Math.round(rect.h * img.naturalHeight));
     canvas.width = sw;
     canvas.height = sh;
     const ctx = canvas.getContext('2d');
@@ -186,109 +187,222 @@ async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
     return (result && result.data && result.data.text) ? result.data.text.trim() : '';
 }
 
-// ==================== DEFAULT RECTS (Prueba A) ====================
+// ==================== DEFAULT RECTS (fallback si no detecta etiquetas) ====================
 const DEFAULT_RECTS = {
-    razonRect: { x: 0.06, y: 0.215, w: 0.88, h: 0.06 }, // línea 4
-    descrRect: { x: 0.05, y: 0.345, w: 0.60, h: 0.14 }  // bloque descripción (izquierda sólo)
+    // Estos valores son aproximados; si tienes formato fijo los ajustamos.
+    razonRect: { x: 0.06, y: 0.20, w: 0.88, h: 0.06 }, // línea donde suele estar campo 4
+    descrRect: { x: 0.05, y: 0.32, w: 0.7, h: 0.16 }   // bloque donde suele estar campo 5
 };
 
-// ==================== EXTRAER MEDIANTE CROPS (mejorado) ====================
+// ==================== DETECCIÓN AUTOMÁTICA DE ETIQUETAS (USANDO WORD BBOX) ====================
+async function detectLabelRectsUsingWords(file) {
+    if (!file) return null;
+    if (!tesseractWorker) await inicializarTesseract();
+
+    try {
+        // Pedimos reconocimiento completo pero nos quedamos con words + bbox
+        try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
+        const res = await tesseractWorker.recognize(file);
+        const wordsRaw = (res && res.data && res.data.words) ? res.data.words : [];
+        if (!wordsRaw.length) return null;
+
+        // Normalizamos cada palabra y extraemos bbox en px (varios formatos)
+        const words = wordsRaw.map(w => {
+            let x0 = w.bbox && w.bbox.x0 ? w.bbox.x0 : (w.x0 || w.left || 0);
+            let y0 = w.bbox && w.bbox.y0 ? w.bbox.y0 : (w.y0 || w.top || 0);
+            let x1 = w.bbox && w.bbox.x1 ? w.bbox.x1 : (w.x1 || (w.left ? w.left + (w.width || 0) : x0 + (w.width || 0)));
+            let y1 = w.bbox && w.bbox.y1 ? w.bbox.y1 : (w.y1 || (w.top ? w.top + (w.height || 0) : y0 + (w.height || 0)));
+            if (x1 < x0) { const t = x0; x0 = x1; x1 = t; }
+            if (y1 < y0) { const t = y0; y0 = y1; y1 = t; }
+            const text = (w.text || w.word || '').toString().trim();
+            return { text, x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+        }).filter(w => w.text && w.text.length > 0);
+
+        if (!words.length) return null;
+
+        // Obtener dimensiones de la imagen
+        const img = await fileToImage(file);
+        const imgW = img.naturalWidth || img.width || 1;
+        const imgH = img.naturalHeight || img.height || 1;
+
+        const normalize = s => (s || '').replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g, ' ').trim().toUpperCase();
+
+        // Buscar palabras que formen la etiqueta "RAZON SOCIAL"
+        let razonLabelBox = null;
+        for (let i = 0; i < words.length; i++) {
+            const t = normalize(words[i].text);
+            if (t.includes('RAZON') || t.includes('RAZÓN')) {
+                // buscar "SOCIAL" en la misma línea (cy similar)
+                const lineY = words[i].cy;
+                const nearby = words.filter(w => Math.abs(w.cy - lineY) < Math.max(14, w.h));
+                const social = nearby.find(n => normalize(n.text).includes('SOCIAL'));
+                if (social) {
+                    razonLabelBox = {
+                        x0: Math.min(words[i].x0, social.x0),
+                        y0: Math.min(words[i].y0, social.y0),
+                        x1: Math.max(words[i].x1, social.x1),
+                        y1: Math.max(words[i].y1, social.y1)
+                    };
+                } else {
+                    razonLabelBox = { x0: words[i].x0, y0: words[i].y0, x1: words[i].x1, y1: words[i].y1 };
+                }
+                break;
+            }
+        }
+
+        // Buscar etiqueta "DESCRIPCION" o "DESCRIPCIÓN"
+        let descrLabelBox = null;
+        for (let i = 0; i < words.length; i++) {
+            const t = normalize(words[i].text);
+            if (t.includes('DESCRIPCION') || t.includes('DESCRIPCIÓN') || (t === '5')) {
+                const lineY = words[i].cy;
+                const nearby = words.filter(w => Math.abs(w.cy - lineY) < Math.max(14, w.h));
+                // Unión de palabras cercanas que componen la etiqueta
+                let minx = words[i].x0, miny = words[i].y0, maxx = words[i].x1, maxy = words[i].y1;
+                nearby.forEach(n => {
+                    const nt = normalize(n.text);
+                    if (nt && (nt.includes('DESCRIP') || nt.includes('NOMBRE') || nt.includes('RESIDUO') || nt.includes('CARACTER') || nt === 'DEL' || nt === '5')) {
+                        minx = Math.min(minx, n.x0);
+                        miny = Math.min(miny, n.y0);
+                        maxx = Math.max(maxx, n.x1);
+                        maxy = Math.max(maxy, n.y1);
+                    }
+                });
+                descrLabelBox = { x0: minx, y0: miny, x1: maxx, y1: maxy };
+                break;
+            }
+        }
+
+        // Si no se detecta ninguna etiqueta, devolvemos null (fallback posterior a DEFAULT_RECTS)
+        if (!razonLabelBox && !descrLabelBox) return null;
+
+        // Construir rects de VALOR a partir de label boxes (heurística):
+        // RAZON: la información suele estar a la derecha en la misma línea -> tomamos desde label.x1 hasta margen derecho
+        // DESCRIPCION: bloque debajo (y/o a la derecha) de la etiqueta -> tomamos desde label.y1 hacia abajo una altura grande
+
+        const padX = Math.round(imgW * 0.01);
+        const padY = Math.round(imgH * 0.01);
+
+        let razonRect = null;
+        if (razonLabelBox) {
+            const rx0 = Math.max(0, razonLabelBox.x1 - padX); // empezamos justo después de la etiqueta
+            const rx1 = Math.min(imgW, imgW - Math.round(imgW * 0.03)); // dejar pequeño margen derecho
+            const ry0 = Math.max(0, razonLabelBox.y0 - padY);
+            const ry1 = Math.min(imgH, razonLabelBox.y1 + Math.round(razonLabelBox.h * 1.2) + padY);
+            razonRect = { x: rx0 / imgW, y: ry0 / imgH, w: (rx1 - rx0) / imgW, h: (ry1 - ry0) / imgH };
+        }
+
+        let descrRect = null;
+        if (descrLabelBox) {
+            // bloque que empieza justo debajo de la etiqueta y se extiende a la derecha
+            const dx0 = Math.max(0, descrLabelBox.x0 - padX);
+            const dx1 = Math.min(imgW, dx0 + Math.round(imgW * 0.80));
+            const dy0 = Math.max(0, descrLabelBox.y1 - Math.round(descrLabelBox.h * 0.3));
+            const dy1 = Math.min(imgH, dy0 + Math.round(imgH * 0.20)); // altura inicial grande
+            descrRect = { x: dx0 / imgW, y: dy0 / imgH, w: (dx1 - dx0) / imgW, h: (dy1 - dy0) / imgH };
+        }
+
+        // Si no hay descrRect pero sí razon, adivinar descrRect más abajo (fallback)
+        if (!descrRect && razonLabelBox) {
+            const guessY = Math.min(0.9, (razonLabelBox.y1 / imgH) + 0.07);
+            descrRect = { x: 0.05, y: guessY, w: 0.8, h: 0.18 };
+        }
+
+        // clamp
+        function clampRect(r) {
+            if (!r) return r;
+            return {
+                x: Math.max(0, Math.min(1, r.x)),
+                y: Math.max(0, Math.min(1, r.y)),
+                w: Math.max(0.01, Math.min(1, r.w)),
+                h: Math.max(0.01, Math.min(1, r.h))
+            };
+        }
+
+        return { razonRect: clampRect(razonRect), descrRect: clampRect(descrRect) };
+
+    } catch (e) {
+        console.warn('detectLabelRectsUsingWords fallo:', e);
+        return null;
+    }
+}
+
+// ==================== EXTRAER MEDIANTE DETECCIÓN+ CROPS (PRINCIPAL) ====================
 async function extractFieldsByCrop(file) {
-    const { razonRect, descrRect } = DEFAULT_RECTS;
+    // Intentar detectar etiquetas y rects
+    let rects = null;
+    try {
+        rects = await detectLabelRectsUsingWords(file);
+    } catch (e) {
+        console.warn('Detección de etiquetas falló:', e);
+    }
+
+    const { razonRect: defaultRazon, descrRect: defaultDescr } = DEFAULT_RECTS;
+    const razonRect = (rects && rects.razonRect) ? rects.razonRect : defaultRazon;
+    const descrRect = (rects && rects.descrRect) ? rects.descrRect : defaultDescr;
 
     let razonText = '';
     let descrText = '';
     let fullResult = null;
 
-    // 1) OCR de la razon (psm single line)
+    // OCR de RAZON (modo single line preferente)
     try {
         razonText = await ocrCrop(file, razonRect, '7');
     } catch (e) {
         console.warn('ocrCrop razon fallo:', e);
     }
 
-    // 2) OCR del header dentro del area de descripcion para detectar etiqueta
-    const headerFrac = 0.06;
-    const headerRect = {
-        x: descrRect.x,
-        y: descrRect.y,
-        w: descrRect.w,
-        h: Math.min(descrRect.h, headerFrac)
-    };
-
+    // intentar recortar header pequeño en descripcion y detectar si etiqueta está dentro
     let headerText = '';
     try {
+        const headerFrac = Math.min(0.08, descrRect.h || 0.06);
+        const headerRect = { x: descrRect.x, y: descrRect.y, w: descrRect.w, h: headerFrac };
         headerText = await ocrCrop(file, headerRect, '6');
     } catch (e) {
-        console.warn('ocrCrop header fallo:', e);
         headerText = '';
     }
 
     const hasHeaderLabel = /DESCRIPCION|DESCRIPCIÓN|DESCRIPCION\s*\(Nombre/i.test(headerText || '');
-
     let actualDescrRect = descrRect;
     if (hasHeaderLabel) {
-        const newY = descrRect.y + headerRect.h;
-        const newH = Math.max(0.03, descrRect.h - headerRect.h);
+        const headerH = Math.min((descrRect.h || 0.06), 0.08);
+        const newY = descrRect.y + headerH;
+        const newH = Math.max(0.04, (descrRect.h || 0.15) - headerH);
         actualDescrRect = { x: descrRect.x, y: newY, w: descrRect.w, h: newH };
     } else {
         actualDescrRect = { ...descrRect };
     }
 
-    // 3) OCR en la región ajustada
+    // OCR de DESCRIPCION
     try {
         descrText = await ocrCrop(file, actualDescrRect, '6');
     } catch (e) {
         console.warn('ocrCrop descripcion fallo:', e);
     }
 
-    // 4) Fallback a OCR completo si hace falta
+    // Fallback OCR completo si textos demasiado cortos
     if ((!razonText || razonText.length < 3) || (!descrText || descrText.length < 3)) {
         try {
             fullResult = await ejecutarOCR(file);
             const fallback = extraerCamposNumeradosFromFull(fullResult);
-            if (!razonText || razonText.length < 3) razonText = fallback.razonSocial;
-            if (!descrText || descrText.length < 3) descrText = fallback.descripcionResiduo;
+            if (!razonText || razonText.length < 3) razonText = fallback.razonSocial || '';
+            if (!descrText || descrText.length < 3) descrText = fallback.descripcionResiduo || '';
         } catch (e) {
             console.warn('OCR completo fallback fallo:', e);
         }
     }
 
-    // 5) Limpiar descripción: eliminar encabezados y numeraciones
-    function cleanDescription(raw) {
+    // limpieza y normalización básica
+    function cleanLines(raw) {
         if (!raw) return '';
-        const lines = raw.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
-
-        const badHeaderRx = /CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO|DESCRIPCION|DESCRIPCIÓN/i;
-        const numLineRx = /^\s*\d+\s*[\.\-\)]/;
-        const shortNoiseRx = /^[\W_0-9]{1,6}$/;
-
-        const goodLines = [];
-        for (let i = 0; i < lines.length; i++) {
-            const ln = lines[i];
-            if (badHeaderRx.test(ln)) continue;
-            if (numLineRx.test(ln)) {
-                const after = ln.replace(/^\s*\d+\s*[\.\-\)]\s*/, '').trim();
-                if (after.length > 2) {
-                    goodLines.push(after);
-                }
-                continue;
-            }
-            if (shortNoiseRx.test(ln)) continue;
-            if (/N[úu]M|REGISTRO AMBIENTAL|MANIFIESTO|RAZON SOCIAL/i.test(ln)) continue;
-            goodLines.push(ln);
-            if (goodLines.length >= 3) break;
-        }
-        return goodLines.join(' ').replace(/^[\:\-\s]+|[\:\-\s]+$/g, '').trim();
+        return raw.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean).join(' ');
     }
 
-    const descripcionFinal = cleanDescription(descrText);
+    const descripcionFinal = (cleanLines(descrText) || '').replace(/^(DESCRIPCION|DESCRIPCIÓN)[\:\-\s]*/i, '').trim();
     const razonFinal = (razonText || '').replace(/^\s*4[\.\-\)\:\s]*/i, '').replace(/RAZON SOCIAL.*?:?/i, '').trim();
 
-    console.log('DEBUG headerText:', headerText);
-    console.log('DEBUG raw descrText:', descrText);
-    console.log('DEBUG descripcionFinal:', descripcionFinal);
-    console.log('DEBUG razonText:', razonText);
+    console.log('DEBUG used rects:', { razonRect, descrRect, actualDescrRect });
+    console.log('DEBUG razonRaw:', razonText, 'descRaw:', descrText);
 
     return {
         razonSocial: razonFinal || 'Desconocido',
@@ -303,7 +417,7 @@ async function extractFieldsByCrop(file) {
 }
 
 function extraerCamposNumeradosFromFull(tesseractResult) {
-    const salida = { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido' };
+    const salida = { razonSocial: '', descripcionResiduo: '' };
     if (!tesseractResult || !tesseractResult.data) return salida;
     const fullText = tesseractResult.data.text || '';
     const lines = fullText.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
@@ -323,50 +437,137 @@ function extraerCamposNumeradosFromFull(tesseractResult) {
     return salida;
 }
 
-// ==================== VERIFICAR CONTRA LISTA MAESTRA ====================
+// ==================== MATCHING AVANZADO (helpers) ====================
+function levenshtein(a, b) {
+    a = a || ''; b = b || '';
+    const al = a.length, bl = b.length;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+    let prev = new Array(bl + 1);
+    for (let j = 0; j <= bl; j++) prev[j] = j;
+    for (let i = 1; i <= al; i++) {
+        let cur = [i];
+        for (let j = 1; j <= bl; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+        }
+        prev = cur;
+    }
+    return prev[bl];
+}
+function similarityNormalized(a, b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    const dist = levenshtein(a, b);
+    const maxLen = Math.max(a.length, b.length);
+    if (maxLen === 0) return 1;
+    return 1 - (dist / maxLen);
+}
+function tokenizeWords(s) {
+    if (!s) return [];
+    return s
+        .toUpperCase()
+        .replace(/[^A-Z0-9ÑÁÉÍÓÚ\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean);
+}
+function tokenIntersectionScore(tokensA, tokensB) {
+    if (!tokensA.length || !tokensB.length) return 0;
+    const setB = new Set(tokensB);
+    let common = 0;
+    for (const t of tokensA) if (setB.has(t)) common++;
+    return common / Math.max(tokensA.length, tokensB.length);
+}
+function containsAsWord(targetNorm, candidateNorm) {
+    if (!targetNorm || !candidateNorm) return false;
+    const esc = candidateNorm.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const rx = new RegExp('\\b' + esc + '\\b', 'i');
+    return rx.test(targetNorm);
+}
+function matchResiduoHeuristic(resTarget, residuoMaster) {
+    if (!resTarget || !residuoMaster) return false;
+    if (containsAsWord(resTarget, residuoMaster)) return true;
+    if (resTarget.includes(residuoMaster) || residuoMaster.includes(resTarget)) return true;
+    const tA = tokenizeWords(resTarget);
+    const tB = tokenizeWords(residuoMaster);
+    const tokenScore = tokenIntersectionScore(tA, tB);
+    if (tokenScore >= 0.45) return true;
+    const sim = similarityNormalized(resTarget, residuoMaster);
+    if (sim >= 0.72) return true;
+    return false;
+}
+function normForMatching(s) { return normalizeForCompare(s || '').toUpperCase(); }
+
+// ==================== FUNCION MEJORADA verificarContraListaMaestra ====================
 function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
     const resultado = { esAceptable: true, coincidencias: [], motivo: '', nivelRiesgo: 'bajo', accionesRecomendadas: [] };
-    const genTargetNorm = normalizeForCompare(razonSocial);
-    const resTargetNorm = normalizeForCompare(descripcionResiduo);
+    const genTargetNorm = normForMatching(razonSocial);
+    const resTargetNorm = normForMatching(descripcionResiduo);
 
     function pushCoin(tipo, valor, estado, motivo) {
         resultado.coincidencias.push({ tipo, valor, estado, motivo });
     }
 
-    for (const item of LISTA_MAESTRA) {
-        const genNorm = normalizeForCompare(item.generador || '');
-        if (genNorm && (genTargetNorm.includes(genNorm) || genNorm.includes(genTargetNorm) || genNorm === genTargetNorm)) {
-            pushCoin('generador', item.generador, item.estado, item.motivo);
-            if (item.estado.includes('rechaz')) {
+    // palabras peligrosas
+    if (descripcionResiduo) {
+        const descTokens = tokenizeWords(descripcionResiduo);
+        for (const p of PALABRAS_PELIGROSAS) {
+            const pNorm = normForMatching(p);
+            if (resTargetNorm && containsAsWord(resTargetNorm, pNorm)) {
                 resultado.esAceptable = false;
-                resultado.motivo = `❌ RECHAZADO: Generador identificado en lista maestra (${item.generador})`;
+                resultado.motivo = `❌ RECHAZADO: Se detectó término peligroso "${p}" en la descripción.`;
                 resultado.nivelRiesgo = 'alto';
-                resultado.accionesRecomendadas = ['No aceptar ingreso. Contactar con coordinador ambiental.'];
-            } else if (item.estado.includes('requiere')) {
-                resultado.esAceptable = false;
-                resultado.motivo = `⚠️ REQUIERE REVISIÓN: Generador identificado (${item.generador})`;
-                resultado.nivelRiesgo = 'medio';
-                resultado.accionesRecomendadas = ['Revisión de documentación adicional.'];
+                resultado.coincidencias.push({ tipo: 'palabra_peligrosa', valor: p, estado: 'rechazado_automatico', motivo: 'Palabra peligrosa detectada' });
+                resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar clasificaciones.'];
+            } else {
+                const tP = tokenizeWords(p);
+                if (tokenIntersectionScore(descTokens, tP) >= 0.7) {
+                    resultado.esAceptable = false;
+                    resultado.motivo = `❌ RECHAZADO: Posible término peligroso detectado ("${p}").`;
+                    resultado.nivelRiesgo = 'alto';
+                    resultado.coincidencias.push({ tipo: 'palabra_peligrosa', valor: p, estado: 'rechazado_automatico', motivo: 'Coincidencia tokenizada' });
+                    resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar clasificaciones.'];
+                }
+            }
+        }
+    }
+
+    for (const item of LISTA_MAESTRA) {
+        const genNorm = normForMatching(item.generador || '');
+        if (genNorm) {
+            if (genTargetNorm && (genTargetNorm.includes(genNorm) || genNorm.includes(genTargetNorm) || genTargetNorm === genNorm || similarityNormalized(genTargetNorm, genNorm) > 0.82)) {
+                pushCoin('generador', item.generador, item.estado, item.motivo);
+                if (item.estado.includes('rechaz')) {
+                    resultado.esAceptable = false;
+                    resultado.motivo = `❌ RECHAZADO: Generador identificado en lista maestra (${item.generador})`;
+                    resultado.nivelRiesgo = 'alto';
+                    resultado.accionesRecomendadas = ['No aceptar ingreso. Contactar con coordinador ambiental.'];
+                } else if (item.estado.includes('requiere')) {
+                    resultado.esAceptable = false;
+                    resultado.motivo = `⚠️ REQUIERE REVISIÓN: Generador identificado (${item.generador})`;
+                    resultado.nivelRiesgo = 'medio';
+                    resultado.accionesRecomendadas = ['Revisión de documentación adicional.'];
+                }
             }
         }
 
-        if (Array.isArray(item.residuos)) {
-            for (const res of item.residuos) {
-                const resNorm = normalizeForCompare(res || '');
-                if (!resNorm) continue;
-                if ((resTargetNorm && (resTargetNorm.includes(resNorm) || resNorm.includes(resTargetNorm)))) {
-                    pushCoin('residuo_especifico', res, item.estado, item.motivo);
-                    if (item.estado.includes('rechaz')) {
-                        resultado.esAceptable = false;
-                        resultado.motivo = `❌ RECHAZADO: Residuo (${res}) no autorizado.`;
-                        resultado.nivelRiesgo = 'alto';
-                        resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar normativa.'];
-                    } else if (item.estado.includes('requiere')) {
-                        resultado.esAceptable = false;
-                        resultado.motivo = `⚠️ REQUIERE REVISIÓN: Residuo (${res}) requiere documentación adicional.`;
-                        resultado.nivelRiesgo = 'medio';
-                        resultado.accionesRecomendadas = ['Solicitar documentación adicional.'];
-                    }
+        const residuos = Array.isArray(item.residuos) ? item.residuos : [item.residuos];
+        for (const res of residuos) {
+            if (!res) continue;
+            const resNorm = normForMatching(res);
+            if (!resNorm) continue;
+            if (matchResiduoHeuristic(resTargetNorm, resNorm)) {
+                pushCoin('residuo_especifico', res, item.estado, item.motivo);
+                if (item.estado.includes('rechaz')) {
+                    resultado.esAceptable = false;
+                    resultado.motivo = `❌ RECHAZADO: Residuo (${res}) no autorizado.`;
+                    resultado.nivelRiesgo = 'alto';
+                    resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar normativa.'];
+                } else if (item.estado.includes('requiere')) {
+                    resultado.esAceptable = false;
+                    resultado.motivo = `⚠️ REQUIERE REVISIÓN: Residuo (${res}) requiere documentación adicional.`;
+                    resultado.nivelRiesgo = 'medio';
+                    resultado.accionesRecomendadas = ['Solicitar documentación adicional.'];
                 }
             }
         }
@@ -388,7 +589,7 @@ async function iniciarAnalisis() {
     if (firstCard) firstCard.style.display = 'none';
     if (processingCard) processingCard.style.display = 'block';
     if (resultsCard) resultsCard.style.display = 'none';
-    if (progressText) progressText.textContent = 'Ejecutando OCR por recortes...';
+    if (progressText) progressText.textContent = 'Detectando campos y ejecutando OCR...';
     if (progressBar) progressBar.style.width = '10%';
 
     try {
@@ -453,7 +654,6 @@ function mostrarResultadosEnInterfaz(resultado) {
     const date = resultado.fechaManifiesto || '';
     const folio = resultado.folio || '';
 
-    // Intentar varios selectores comunes - añade IDs exactos si los conoces
     setField('detectedCompany', company);
     setField('#detectedCompany', company);
     setField('input[name="razonSocial"]', company);
@@ -468,11 +668,9 @@ function mostrarResultadosEnInterfaz(resultado) {
 
     setField('detectedDate', date);
     setField('#detectedDate', date);
-    setField('input[name="fechaManifiesto"]', date);
 
     setField('detectedFolio', folio);
     setField('#detectedFolio', folio);
-    setField('input[name="folio"]', folio);
 
     const resultStatus = document.getElementById('resultStatus');
     const isAcceptable = resultado.esAceptable;
@@ -500,7 +698,7 @@ function mostrarResultadosEnInterfaz(resultado) {
     }
     if (verificationContent) verificationContent.innerHTML = detallesHTML;
 
-    console.log('mostrarResultadosEnInterfaz: company=', company, 'waste=', waste, 'date=', date, 'folio=', folio);
+    console.log('mostrarResultadosEnInterfaz: company=', company, 'waste=', waste);
 }
 
 // ==================== Incidencias, reportes y utilidades (resumidas) ====================
