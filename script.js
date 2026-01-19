@@ -90,8 +90,6 @@ function matchResiduoHeuristic(resTarget, residuoMaster) {
   return false;
 }
 function normForMatching(s) { return normalizeForCompare(s || '').toUpperCase(); }
-
-// Map company name to canonical form in LISTA_MAESTRA if sufficiently similar
 function matchCompanyToMaster(candidate) {
   if (!candidate) return '';
   const candNorm = normalizeForCompare(candidate);
@@ -109,7 +107,7 @@ function matchCompanyToMaster(candidate) {
 async function inicializarTesseract() {
   try {
     if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js no encontrado');
-    tesseractWorker = await Tesseract.createWorker({ logger: m => {/* optional logging */} });
+    tesseractWorker = await Tesseract.createWorker({ logger: m => {/*optional*/} });
     await tesseractWorker.loadLanguage('spa');
     await tesseractWorker.initialize('spa');
     try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
@@ -156,8 +154,6 @@ async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
   const { data } = await tesseractWorker.recognize(blob);
   return data && data.text ? data.text.trim() : '';
 }
-
-// DEFAULT RECTS (ajustables)
 const DEFAULT_RECTS = {
   razonRect: { x: 0.05, y: 0.18, w: 0.90, h: 0.09 },
   descrRect: { x: 0.05, y: 0.30, w: 0.80, h: 0.20 }
@@ -184,20 +180,19 @@ function groupWordsIntoRows(words) {
   return rows;
 }
 
-// ==================== Helper: detectar si cadena parece una dirección/folio/manifiesto ====================
+// ==================== DETECTAR SI CADENA PARECE DIRECCIÓN O MANIFIESTO ====================
 function looksLikeAddressOrManifest(s) {
   if (!s) return false;
   const up = s.toUpperCase();
   if (/\bDOMICILIO\b|\bC\.P\b|\bCP\b|\bTEL\b|\bTEL\.?\b|\bAVENIDA\b|\bAV\.?\b|\bPERIFERICO\b|\bCOL\b|\bCALLE\b|\bCP\./.test(up)) return true;
   if (/EV[-\s]?\d+|NO\.\s*DE\s*MANIFIESTO|N[ÚU]M\.?\s*DE\s*REGISTRO|^\d{2}\/\d{2}\/\d{2,4}/.test(up)) return true;
-  // mayoría de dígitos: probable código
   const letters = (s.match(/[A-ZÁÉÍÓÚÑ]/gi) || []).length;
   const digits = (s.match(/\d/g) || []).length;
   if (digits > letters && digits > 2) return true;
   return false;
 }
 
-// ==================== EXTRACCIÓN: prioridad palabras + mejoras para campo 4 ====================
+// ==================== EXTRACCIÓN (mejorada para campo 4 y 5) ====================
 async function extractFieldsByCrop(file) {
   let razon = '', descripcion = '', fullText = '';
   try {
@@ -229,16 +224,14 @@ async function extractFieldsByCrop(file) {
     const rows = groupWordsIntoRows(words);
     console.log('DEBUG rowsPreview:', rows.slice(0,20).map(r => r.words.map(w=>w.text).join(' | ')));
 
-    // === RAZÓN SOCIAL (campo 4) con validaciones para evitar direcciones/manifiestos ===
+    // --- RAZÓN SOCIAL (campo 4) ---
     let companyFound = '';
     const fullUpper = (fullText || '').replace(/\r/g,'\n');
 
-    // 1) Strict regex on same line
     let m = fullUpper.match(/4\W{0,3}[-\.\)]?\s*RAZON\s+SOCIAL(?:\s+DE\s+LA\s+EMPRESA)?[^\n\r]*[:\-\s]{1,}\s*([^\n\r]+)/i);
     if (m && m[1] && m[1].trim().length>2 && !looksLikeAddressOrManifest(m[1])) {
       companyFound = m[1].trim();
     } else {
-      // 2) search occurrences and pick next non-address line
       const lines = fullUpper.split('\n');
       for (let i=0;i<lines.length;i++) {
         if (/RAZON\s+SOCIAL/i.test(lines[i])) {
@@ -252,8 +245,6 @@ async function extractFieldsByCrop(file) {
           if (companyFound) break;
         }
       }
-
-      // 3) prefer matching a name from LISTA_MAESTRA if present
       if (!companyFound) {
         const normFull = normalizeForCompare(fullUpper);
         for (const item of LISTA_MAESTRA) {
@@ -264,8 +255,6 @@ async function extractFieldsByCrop(file) {
           }
         }
       }
-
-      // 4) fallback: locate "RAZON" in rows but validate candidate
       if (!companyFound) {
         let razonRowIdx = -1, razonWordIdx = -1;
         for (let i=0;i<rows.length;i++) {
@@ -290,7 +279,6 @@ async function extractFieldsByCrop(file) {
       }
     }
 
-    // If companyFound still looks like address (rare), try strict fallback to line after label
     if (companyFound && looksLikeAddressOrManifest(companyFound)) {
       const parts = fullUpper.split('\n');
       const idx = parts.findIndex(p => /RAZON\s+SOCIAL/i.test(p));
@@ -299,11 +287,10 @@ async function extractFieldsByCrop(file) {
       }
     }
 
-    // map and clean
     const cleanCompany = (companyFound || '').replace(/\s{2,}/g,' ').replace(/^[\-\:\.]+/,'').trim();
     const finalCompany = matchCompanyToMaster(cleanCompany) || cleanCompany || 'Desconocido';
 
-    // === DESCRIPCIÓN (campo 5): línea inmediata debajo ===
+    // --- DESCRIPCIÓN (campo 5) : tomar SOLO LA LÍNEA PRINCIPAL ---
     let descFound = '';
     let mm = fullUpper.match(/5\W{0,3}[-\.\)]?\s*DESCRIPCION[^\n\r]*[:\-\s]{0,}\s*([^\n\r]*)/i);
     if (mm && mm[1] && mm[1].trim().length>3) {
@@ -329,48 +316,48 @@ async function extractFieldsByCrop(file) {
           if (stopHeaders.some(h => norm.includes(h))) { candidateIdx++; continue; }
           if (/^[\d\W]+$/.test(lineText)) { candidateIdx++; continue; }
           if (/RAZON\s+SOCIAL|MANIFIESTO|REGISTRO AMBIENTAL|NO\.\s*DE\s*MANIFIESTO/i.test(lineText)) { candidateIdx++; continue; }
+          // Use ONLY the first valid line (principal name)
           descFound = lineText;
-          if (descFound.length < 6 && (candidateIdx + 1) < rows.length) {
-            const nextLine = rows[candidateIdx+1].words.map(w=>w.text).join(' ').trim();
-            if (nextLine && !stopHeaders.some(h => nextLine.replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g,' ').toUpperCase().includes(h))) {
-              descFound = (descFound + ' ' + nextLine).trim();
-            }
-          }
           break;
         }
       }
     }
 
-    // Fallbacks recortados
-    if (!finalCompany || finalCompany === 'Desconocido') {
-      try {
-        const razonCrop = await ocrCrop(file, DEFAULT_RECTS.razonRect, '7');
-        if (razonCrop && razonCrop.trim().length>2) {
-          const cand = razonCrop.replace(/RAZON\s+SOCIAL.*?:?/i,'').trim();
-          if (cand && !looksLikeAddressOrManifest(cand)) finalCompany = matchCompanyToMaster(cand) || cand;
-        }
-      } catch (e) { console.warn('fallback razonCrop fail', e); }
+    // If desc is multi-line captured earlier, ensure we only keep the first logical line
+    if (descFound) {
+      // split on common separators (pipes, long dashes, table columns) and take first fragment
+      let frag = descFound.split(/[\|\–\—\-]{2,}|\||\t/)[0].trim();
+      // also split on multiple spaces preceded/followed by numbers/units
+      frag = frag.split(/CAPACIDAD|CONTENEDOR|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
+      // remove leading numeric measures like "600KGS", "15.0M3/1 1,400" etc. Keep only textual name portion
+      frag = frag.replace(/(^[\d\.,\s]*[KkGgSsLlmM3\/\s\(\)]{0,})/,'').trim();
+      // final cleanup: remove odd characters and excessive spaces
+      frag = frag.replace(/[_\[\]\{\}]+/g,' ').replace(/\s{2,}/g,' ').trim();
+      descFound = frag;
     }
+
+    // Fallback crop if still empty
     if (!descFound || descFound.length < 3) {
       try {
         const descrCrop = await ocrCrop(file, DEFAULT_RECTS.descrRect, '6');
         if (descrCrop && descrCrop.trim().length>2) {
           descFound = descrCrop.replace(/DESCRIPCION.*?:?/i,'').split(/\n/).map(l=>l.trim()).filter(Boolean)[0] || descrCrop.trim();
+          // same cleanup
+          descFound = descFound.split(/[\|\–\—\-]{2,}|\||\t/)[0].trim();
+          descFound = descFound.split(/CAPACIDAD|CONTENEDOR|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
+          descFound = descFound.replace(/^\s*[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?\b/i,'').trim();
         }
       } catch (e) { console.warn('fallback descrCrop fail', e); }
     }
 
-    // Limpieza de descripcion
-    let cleanDesc = (descFound || '').replace(/\s{2,}/g,' ').trim();
-    cleanDesc = cleanDesc.split(/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
-    cleanDesc = cleanDesc.replace(/^\s*[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?\b/i,'').trim();
+    const finalDesc = (descFound && descFound.length>0) ? descFound : 'Desconocido';
 
     console.log('DEBUG extracted raw company:', companyFound);
     console.log('DEBUG finalCompany (after mapping):', finalCompany);
     console.log('DEBUG extracted raw desc:', descFound);
-    console.log('DEBUG finalDesc:', cleanDesc || 'Desconocido');
+    console.log('DEBUG finalDesc:', finalDesc);
 
-    return { razonSocial: finalCompany || 'Desconocido', descripcionResiduo: cleanDesc || 'Desconocido', textoOCRCompleto: fullText || '' };
+    return { razonSocial: finalCompany || 'Desconocido', descripcionResiduo: finalDesc || 'Desconocido', textoOCRCompleto: fullText || '' };
 
   } catch (err) {
     console.warn('extractFieldsByCrop error, fallback to full OCR', err);
@@ -381,7 +368,6 @@ async function extractFieldsByCrop(file) {
       const { razonSocial, descripcionResiduo } = extractFieldsFromFullText(fullText);
       const finalCompany = matchCompanyToMaster(razonSocial) || razonSocial || 'Desconocido';
       const finalDesc = descripcionResiduo || 'Desconocido';
-      console.log('DEBUG fallback fullText razon:', razonSocial, 'desc:', descripcionResiduo);
       return { razonSocial: finalCompany, descripcionResiduo: finalDesc, textoOCRCompleto: fullText };
     } catch (e2) {
       console.error('Fallback OCR also failed', e2);
@@ -390,7 +376,6 @@ async function extractFieldsByCrop(file) {
   }
 }
 
-// Heurística sobre texto completo si se usa fallback puro
 function extractFieldsFromFullText(fullText) {
   const salida = { razonSocial: '', descripcionResiduo: '' };
   if (!fullText) return salida;
@@ -508,7 +493,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
   return resultado;
 }
 
-// ==================== mostrarResultadosEnInterfaz ====================
+// ==================== Mostrar resultados en la UI ====================
 function mostrarResultadosEnInterfaz(resultado) {
   if (!resultado) return;
   function setField(idOrSel, value) {
@@ -544,7 +529,7 @@ function mostrarResultadosEnInterfaz(resultado) {
   console.log('Resultado mostrado en UI:', resultado);
 }
 
-// ==================== flujo iniciarAnalisis ====================
+// ==================== iniciarAnalisis ====================
 async function iniciarAnalisis() {
   if (!currentImage) { safeMostrarError('Sube o captura la imagen primero.'); return; }
   const processingCard = document.querySelector('.processing-card');
@@ -652,7 +637,7 @@ function handleFileSelect(event) {
   if (processBtn) processBtn.disabled = false;
 }
 
-// ==================== REINICIAR ESCANEO (definida temprano para evitar ReferenceError) ====================
+// ==================== REINICIAR ESCANEO ====================
 function reiniciarEscaneo() {
   currentImage = null; ultimoResultado = null;
   const imagePreview = document.getElementById('imagePreview');
@@ -663,6 +648,18 @@ function reiniciarEscaneo() {
   const firstCard = document.querySelector('.card:first-of-type'); if (firstCard) firstCard.style.display = 'block';
   closeCamera();
   console.log('reiniciarEscaneo ejecutado');
+}
+
+// ==================== descargarReporteCompleto (asegurar existencia y funcionamiento) ====================
+function descargarReporteCompleto() {
+  if (!ultimoResultado) { alert('No hay resultado para descargar.'); return; }
+  const contenido = generarReporteCompleto(ultimoResultado);
+  const blob = new Blob([contenido], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `reporte_manifiesto_${ultimoResultado.idAnalisis}.txt`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function generarReporteCompleto(resultado) {
+  return `REPORTE ANALISIS\nID: ${resultado.idAnalisis}\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\nMotivo: ${resultado.motivo}\nTexto OCR:\n${resultado.textoOCRCompleto || resultado.textoOriginal || ''}\n`;
 }
 
 // ==================== EVENTOS E INICIALIZACIÓN ====================
@@ -683,11 +680,17 @@ function setupEventListeners() {
   if (cancelCameraBtn) cancelCameraBtn.addEventListener('click', closeCamera);
   if (processBtn) processBtn.addEventListener('click', iniciarAnalisis);
   if (newScanBtn) newScanBtn.addEventListener('click', reiniciarEscaneo);
+
+  // asegurarse de enlazar el botón descargar (por si no existía en el markup en el momento anterior)
   if (downloadReportBtn) downloadReportBtn.addEventListener('click', descargarReporteCompleto);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
+  // vínculo adicional por si el botón se añadió dinámicamente después del setup (refuerzo)
+  const downloadReportBtnLate = document.getElementById('downloadReportBtn');
+  if (downloadReportBtnLate) downloadReportBtnLate.addEventListener('click', descargarReporteCompleto);
+
   try { await inicializarTesseract(); } catch (e) { console.warn('Tesseract init error', e); }
   try { const saved = localStorage.getItem('historialIncidencias'); if (saved) historialIncidencias = JSON.parse(saved); } catch (e) { console.warn('No se pudo cargar historial', e); }
 });
