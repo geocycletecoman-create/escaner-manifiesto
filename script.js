@@ -1,10 +1,10 @@
 // ==================== LISTA MAESTRA ====================
 const LISTA_MAESTRA = [
-  { generador: "SYNTHON SA DE CV", residuos: ["MEDICAMENTO CADUCO Y OBSOLETO Y EMPAQUE PRIMARIO"],estado: "rechazado_automatico", motivo: "Residuos de inflamables peligrosos no autorizados" },
+  { generador: "SYNTHON SA DE CV", residuos: ["MEDICAMENTO CADUCO Y OBSOLETO Y EMPAQUE PRIMARIO"], estado: "ingreso_aceptable", motivo: "Residuo permitido" },
   { generador: "SYNTHON MEXICO SA DE CV", residuos: ["MEDICAMENTO CADUCO Y OBSOLETO Y EMPAQUE PRIMARIO"], estado: "ingreso_aceptable", motivo: "Residuo permitido" },
-  { generador: "RELLENO VILLA DE ALVAREZ", residuos: ["RSU", "LLANTAS USADAS", "LLANTAS"], estado: "requiere_permiso_especial", motivo: "Requiere permiso especial" },
-  { generador: "LABORATORIOS PISA S.A. DE C.V. (TLAJOMULCO)", residuos: ["BASURA INDUSTRIAL CONTAMINADA"], estado: "requiere_permiso_especial", motivo: "Requiere permiso especial" },
-  { generador: "NISSAN MEXICANA, S.A. DE C.V.", residuos: ["REACTIVOS EXPERIMENTALES"], estado: "requiere_revision", motivo: "Requiere revisión de documentación adicional" },
+  { generador: "RELLENO VILLA DE ALVAREZ", residuos: ["RSU", "Llantas Usadas"], estado: "requiere_permiso_especial", motivo: "Ingreso aceptable" },
+  { generador: "LABORATORIOS PISA S.A. DE C.V. (TLAJOMULCO)", residuos: ["BASURA INDUSTRIAL CONTAMINADA"], estado: "requiere_permiso_especial", motivo: "Ingreso aceptable" },
+  { generador: "NISSAN MEXICANA, S.A. DE C.V.", residuos: ["reactivos experimentales"], estado: "requiere_revision", motivo: "Requiere revisión de documentación adicional" },
   { generador: "NISSAN MEXICANA, S.A. DE C.V.", residuos: ["INFLAMABLES"], estado: "rechazado_automatico", motivo: "Residuos de inflamables peligrosos no autorizados" }
 ];
 
@@ -107,7 +107,7 @@ function matchCompanyToMaster(candidate) {
 async function inicializarTesseract() {
   try {
     if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js no encontrado');
-    tesseractWorker = await Tesseract.createWorker({ logger: m => {/* optional */} });
+    tesseractWorker = await Tesseract.createWorker({ logger: m => {/* optional logging */} });
     await tesseractWorker.loadLanguage('spa');
     await tesseractWorker.initialize('spa');
     try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
@@ -154,8 +154,6 @@ async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
   const { data } = await tesseractWorker.recognize(blob);
   return data && data.text ? data.text.trim() : '';
 }
-
-// DEFAULT RECTS (ajustables)
 const DEFAULT_RECTS = {
   razonRect: { x: 0.05, y: 0.18, w: 0.90, h: 0.09 },
   descrRect: { x: 0.05, y: 0.30, w: 0.80, h: 0.20 }
@@ -194,7 +192,7 @@ function looksLikeAddressOrManifest(s) {
   return false;
 }
 
-// ==================== EXTRACCIÓN: prioridad palabras + mejoras ====================
+// ==================== EXTRACCIÓN (campo 4 y 5) ====================
 async function extractFieldsByCrop(file) {
   if (!file) return { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', textoOCRCompleto: '' };
   try {
@@ -226,7 +224,7 @@ async function extractFieldsByCrop(file) {
     const rows = groupWordsIntoRows(words);
     console.log('DEBUG rowsPreview:', rows.slice(0,20).map(r => r.words.map(w=>w.text).join(' | ')));
 
-    // RAZÓN SOCIAL
+    // Extract company (field 4)
     let companyFound = '';
     const fullUpper = (fullText || '').replace(/\r/g,'\n');
 
@@ -292,7 +290,7 @@ async function extractFieldsByCrop(file) {
     const cleanCompany = (companyFound || '').replace(/\s{2,}/g,' ').replace(/^[\-\:\.]+/,'').trim();
     const finalCompany = matchCompanyToMaster(cleanCompany) || cleanCompany || 'Desconocido';
 
-    // DESCRIPCION
+    // Extract description (field 5) - first valid line after label
     let descFound = '';
     let mm = fullUpper.match(/5\W{0,3}[-\.\)]?\s*DESCRIPCION[^\n\r]*[:\-\s]{0,}\s*([^\n\r]*)/i);
     if (mm && mm[1] && mm[1].trim().length>3) {
@@ -347,9 +345,47 @@ async function extractFieldsByCrop(file) {
     const finalDesc = (descFound && descFound.length>0) ? descFound : 'Desconocido';
     return { razonSocial: finalCompany || 'Desconocido', descripcionResiduo: finalDesc || 'Desconocido', textoOCRCompleto: fullText || '' };
   } catch (err) {
-    console.error('extractFieldsByCrop error', err);
+    console.warn('extractFieldsByCrop error', err);
     return { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', textoOCRCompleto: '' };
   }
+}
+
+function extractFieldsFromFullText(fullText) {
+  const salida = { razonSocial: '', descripcionResiduo: '' };
+  if (!fullText) return salida;
+  const lines = fullText.replace(/\r/g,'\n').split('\n').map(l => l.trim()).filter(Boolean);
+  for (let i=0;i<lines.length;i++) {
+    const ln = lines[i];
+    if (/^\s*4\W|RAZON\s+SOCIAL/i.test(ln)) {
+      let after = ln.replace(/^\s*4\W*|RAZON\s+SOCIAL.*?:?/i,'').trim();
+      if (after && after.length>2) salida.razonSocial = after;
+      else if (lines[i+1]) salida.razonSocial = lines[i+1].trim();
+      break;
+    }
+  }
+  for (let i=0;i<lines.length;i++) {
+    const ln = lines[i];
+    if (/^\s*5\W|DESCRIPCION/i.test(ln)) {
+      let collected = [];
+      let j = i+1;
+      while (j < lines.length) {
+        const l2 = lines[j];
+        if (/CONTENEDOR|CAPACIDAD|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i.test(l2)) break;
+        if (!/^[\d\W]{1,}$/.test(l2)) collected.push(l2);
+        if (collected.length >= 3) break;
+        j++;
+      }
+      if (collected.length) salida.descripcionResiduo = collected[0].replace(/^[\-\:\.\s\d]+/,'').trim();
+      else {
+        let after = ln.replace(/^\s*5\W*|DESCRIPCION.*?:?/i,'').trim();
+        salida.descripcionResiduo = after || '';
+      }
+      break;
+    }
+  }
+  salida.razonSocial = (salida.razonSocial || '').replace(/\s{2,}/g,' ').trim();
+  salida.descripcionResiduo = (salida.descripcionResiduo || '').replace(/\s{2,}/g,' ').replace(/^[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?/i,'').trim();
+  return salida;
 }
 
 // ==================== verificarContraListaMaestra ====================
@@ -359,7 +395,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
   const resTargetNorm = normForMatching(descripcionResiduo);
   function pushCoin(tipo, valor, estado, motivo) { resultado.coincidencias.push({ tipo, valor, estado, motivo }); }
 
-  // palabras peligrosas
+  // palabras peligrosas (alto riesgo)
   if (descripcionResiduo) {
     const descTokens = tokenizeWordsForMatch(descripcionResiduo);
     for (const p of PALABRAS_PELIGROSAS) {
@@ -394,7 +430,8 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
           resultado.esAceptable = false;
           resultado.motivo = `❌ RECHAZADO: Generador identificado en lista maestra (${item.generador})`;
           resultado.nivelRiesgo = 'alto';
-          resultado.accionesRecomendadas = ['No aceptar ingreso. Contactar coordinador ambiental.'];
+          resultado.accionesRecomendadas = ['No aceptar ingreso. Contactar con coordinador ambiental.'];
+          // continue scanning to collect residues as well
         } else if (item.estado === 'requiere_permiso_especial' || item.estado === 'requiere_revision') {
           resultado.esAceptable = false;
           resultado.motivo = `⚠️ REQUIERE REVISIÓN: Generador identificado (${item.generador})`;
@@ -421,6 +458,9 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
           resultado.motivo = `⚠️ REQUIERE REVISIÓN: Residuo (${res}) requiere documentación adicional.`;
           resultado.nivelRiesgo = 'medio';
           resultado.accionesRecomendadas = ['Solicitar documentación adicional.'];
+        } else if (item.estado === 'ingreso_aceptable') {
+          // acceptable but continue scanning to collect other coincidences
+          resultado.esAceptable = resultado.esAceptable && true;
         }
       }
     }
@@ -430,7 +470,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
   return resultado;
 }
 
-// ==================== Mostrar resultados en UI (y mostrar sección incidencia si aplica) ====================
+// ==================== Mostrar resultados en la UI ====================
 function mostrarResultadosEnInterfaz(resultado) {
   if (!resultado) return;
   function setField(idOrSel, value) {
@@ -463,24 +503,27 @@ function mostrarResultadosEnInterfaz(resultado) {
     } else verificationContent.innerHTML = '<div>No se encontraron coincidencias.</div>';
   }
 
+  // Show incidence section when not acceptable
   const incidenceSection = document.getElementById('incidenceSection');
   if (incidenceSection) {
     if (!resultado.esAceptable) {
       incidenceSection.style.display = 'block';
-      const notesEl = document.getElementById('incidenceNotes'); if (notesEl) notesEl.value = '';
-      const assignedEl = document.getElementById('assignedTo'); if (assignedEl) assignedEl.value = '';
+      const notesEl = document.getElementById('incidenceNotes');
+      if (notesEl) notesEl.value = '';
+      const assignedEl = document.getElementById('assignedTo');
+      if (assignedEl) assignedEl.value = '';
       incidenceSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
       incidenceSection.style.display = 'none';
     }
   } else {
-    if (!resultado.esAceptable) console.warn('No existe #incidenceSection en el DOM');
+    if (!resultado.esAceptable) console.warn('No existe #incidenceSection en el DOM para registrar incidencias.');
   }
 
   console.log('Resultado mostrado en UI:', resultado);
 }
 
-// ==================== iniciarAnalisis ====================
+// ==================== INICIAR ANALISIS ====================
 async function iniciarAnalisis() {
   if (!currentImage) { safeMostrarError('Sube o captura la imagen primero.'); return; }
   const processingCard = document.querySelector('.processing-card');
@@ -529,7 +572,7 @@ async function iniciarAnalisis() {
   }
 }
 
-// ==================== CAMARA / CAPTURA / FILE HANDLERS ====================
+// ==================== CAMARA / CAPTURA / FILE HANDLERS (DECLARADAS para evitar ReferenceError) ====================
 async function openCamera() {
   try {
     if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
@@ -550,7 +593,11 @@ async function openCamera() {
 
 function captureFromCamera() {
   const video = document.getElementById('cameraStream');
-  if (!video) { const fileInput = document.getElementById('fileInput'); if (fileInput) fileInput.click(); return; }
+  if (!video) {
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) fileInput.click();
+    return;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth || 1280;
   canvas.height = video.videoHeight || 720;
@@ -569,7 +616,9 @@ function captureFromCamera() {
 }
 
 function closeCamera() {
-  try { if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  try {
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+  } catch (e) {}
   cameraStream = null;
   const cameraView = document.getElementById('cameraView');
   const imagePreview = document.getElementById('imagePreview');
@@ -577,6 +626,7 @@ function closeCamera() {
   if (imagePreview) imagePreview.style.display = 'flex';
 }
 
+// File select handler
 function handleFileSelect(event) {
   const file = (event.target && event.target.files && event.target.files[0]) || null;
   if (!file) return;
@@ -604,78 +654,30 @@ function reiniciarEscaneo() {
   console.log('reiniciarEscaneo ejecutado');
 }
 
-// ==================== REPORTES : TXT y PDF para incidencias ====================
-function generarReporteIncidencia(incidencia) {
-  const r = incidencia.resultadoAnalisis || {};
-  return [
-    `REPORTE DE INCIDENCIA`,
-    `ID: ${incidencia.id}`,
-    `Fecha: ${incidencia.fecha}`,
-    `Generador: ${r.razonSocial || ''}`,
-    `Residuo: ${r.descripcionResiduo || ''}`,
-    `Motivo del análisis: ${r.motivo || ''}`,
-    `Nivel de riesgo: ${r.nivelRiesgo || ''}`,
-    `Asignado a: ${incidencia.asignadoA || 'No asignado'}`,
-    ``,
-    `Observaciones:`,
-    incidencia.notas || '',
-    ``,
-    `Texto OCR:`,
-    (r.textoOriginal || r.textoOCRCompleto || '').slice(0, 10000)
-  ].join('\n');
+// ==================== descargarReporteCompleto ====================
+function generarReporteCompleto(resultado) {
+  return `REPORTE ANALISIS\nID: ${resultado.idAnalisis}\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\nMotivo: ${resultado.motivo}\nTexto OCR:\n${resultado.textoOriginal || resultado.textoOCRCompleto || ''}\n`;
+}
+function descargarReporteCompleto() {
+  if (!ultimoResultado) { alert('No hay resultado para descargar.'); return; }
+  const contenido = generarReporteCompleto(ultimoResultado);
+  const blob = new Blob([contenido], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `reporte_manifiesto_${ultimoResultado.idAnalisis}.txt`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-function descargarReporteIncidenciaTxt(incidencia) {
+// ==================== INCIDENCIAS: registrar, guardar, descargar ====================
+function generarIdIncidencia() { return 'INC-' + Date.now().toString().slice(-8); }
+function generarReporteIncidencia(incidencia) {
+  const r = incidencia.resultadoAnalisis || {};
+  return `REPORTE DE INCIDENCIA\nID: ${incidencia.id}\nFecha: ${incidencia.fecha}\nGenerador: ${r.razonSocial || ''}\nResiduo: ${r.descripcionResiduo || ''}\nMotivo: ${r.motivo || ''}\nNotas:\n${incidencia.notas}\n\nTexto OCR:\n${(r.textoOriginal || r.textoOCRCompleto || '').slice(0,5000)}\n`;
+}
+function descargarReporteIncidencia(incidencia) {
   const contenido = generarReporteIncidencia(incidencia);
   const blob = new Blob([contenido], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = `incidencia_${incidencia.id}.txt`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
-
-function descargarReporteIncidenciaPDF(incidencia) {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert('jsPDF no está cargado. Asegúrese de incluir el CDN antes de script.js');
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const margin = 40;
-  const maxW = doc.internal.pageSize.getWidth() - margin * 2;
-  let y = margin;
-
-  doc.setFontSize(18);
-  doc.setTextColor(15, 41, 77);
-  doc.text('REPORTE DE INCIDENCIA', margin, y);
-  y += 26;
-
-  doc.setFontSize(11);
-  doc.setTextColor(33, 47, 61);
-
-  const push = (title, text) => {
-    doc.setFont(undefined, 'bold'); doc.text(title, margin, y); y += 14;
-    doc.setFont(undefined, 'normal');
-    const lines = doc.splitTextToSize(text || '', maxW);
-    doc.text(lines, margin, y);
-    y += lines.length * 14 + 10;
-    if (y > doc.internal.pageSize.getHeight() - margin) { doc.addPage(); y = margin; }
-  };
-
-  push('ID:', incidencia.id);
-  push('Fecha:', incidencia.fecha);
-  push('Generador:', (incidencia.resultadoAnalisis && incidencia.resultadoAnalisis.razonSocial) || '');
-  push('Residuo:', (incidencia.resultadoAnalisis && incidencia.resultadoAnalisis.descripcionResiduo) || '');
-  push('Motivo análisis:', (incidencia.resultadoAnalisis && incidencia.resultadoAnalisis.motivo) || '');
-  push('Nivel de riesgo:', (incidencia.resultadoAnalisis && incidencia.resultadoAnalisis.nivelRiesgo) || '');
-  push('Asignado a:', incidencia.asignadoA || 'No asignado');
-  push('Observaciones:', incidencia.notas || '');
-  push('Texto OCR:', (incidencia.resultadoAnalisis && (incidencia.resultadoAnalisis.textoOriginal || incidencia.resultadoAnalisis.textoOCRCompleto)) || '');
-
-  doc.save(`incidencia_${incidencia.id}.pdf`);
-}
-
-// ==================== INCIDENCIAS: registro y UI ====================
-function generarIdIncidencia() { return 'INC-' + Date.now().toString().slice(-8); }
-
 function mostrarConfirmacionIncidencia(incidencia) {
   const incidenceSection = document.getElementById('incidenceSection');
   if (!incidenceSection) return;
@@ -685,24 +687,20 @@ function mostrarConfirmacionIncidencia(incidencia) {
         <i class="bi bi-check-circle-fill" style="font-size:1.5rem;color:#38a169"></i>
         <div>
           <strong>Incidencia registrada: ${incidencia.id}</strong>
-          <div style="margin-top:6px;color:#4a5568">Asignado a: <strong>${incidencia.asignadoA || 'No asignado'}</strong></div>
+          <div style="margin-top:6px;color:#4a5568">Se ha creado la incidencia y puede descargar el reporte o iniciar un nuevo escaneo.</div>
         </div>
       </div>
       <div style="margin-top:12px;display:flex;gap:8px">
-        <button id="downloadIncidencePdf" class="btn" style="background:#2b6cb0"><i class="bi bi-file-earmark-pdf"></i> Descargar PDF</button>
-        <button id="downloadIncidenceTxt" class="btn" style="background:#38a169"><i class="bi bi-download"></i> Descargar TXT</button>
+        <button id="downloadIncidenceReport" class="btn" style="background:#38a169"><i class="bi bi-download"></i> Descargar Reporte</button>
         <button id="newScanAfterIncidence" class="btn btn-outline">Nuevo Escaneo</button>
       </div>
     </div>
   `;
-  const pdfBtn = document.getElementById('downloadIncidencePdf');
-  const txtBtn = document.getElementById('downloadIncidenceTxt');
+  const dlBtn = document.getElementById('downloadIncidenceReport');
+  if (dlBtn) dlBtn.addEventListener('click', () => descargarReporteIncidencia(incidencia));
   const nsBtn = document.getElementById('newScanAfterIncidence');
-  if (pdfBtn) pdfBtn.addEventListener('click', () => descargarReporteIncidenciaPDF(incidencia));
-  if (txtBtn) txtBtn.addEventListener('click', () => descargarReporteIncidenciaTxt(incidencia));
   if (nsBtn) nsBtn.addEventListener('click', () => { reiniciarEscaneo(); const incSec = document.getElementById('incidenceSection'); if (incSec) incSec.style.display = 'none'; });
 }
-
 function registrarIncidencia() {
   if (!ultimoResultado) { alert('No hay resultado para registrar.'); return; }
   const notesEl = document.getElementById('incidenceNotes');
@@ -715,15 +713,9 @@ function registrarIncidencia() {
   try { localStorage.setItem('historialIncidencias', JSON.stringify(historialIncidencias)); } catch (e) { console.warn('No se pudo guardar historialIncidencias', e); }
   mostrarConfirmacionIncidencia(incidencia);
 }
+function omitirIncidencia() { if (confirm('¿Omitir registro de incidencia?')) { reiniciarEscaneo(); const sec = document.getElementById('incidenceSection'); if (sec) sec.style.display = 'none'; } }
 
-function omitirIncidencia() {
-  if (!confirm('¿Omitir registro de incidencia?')) return;
-  const incidenceSection = document.getElementById('incidenceSection');
-  if (incidenceSection) incidenceSection.style.display = 'none';
-  reiniciarEscaneo();
-}
-
-// ==================== setupEventListeners (seguro con typeof) ====================
+// ==================== EVENTOS E INICIALIZACIÓN ====================
 function setupEventListeners() {
   const cameraBtn = document.getElementById('cameraBtn');
   const uploadBtn = document.getElementById('uploadBtn');
@@ -755,7 +747,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { await inicializarTesseract(); } catch (e) { console.warn('Tesseract init error', e); }
 });
 
-// cleanup
 window.addEventListener('beforeunload', () => {
   try { if (tesseractWorker && typeof tesseractWorker.terminate === 'function') tesseractWorker.terminate(); } catch (e) {}
   if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
