@@ -19,6 +19,7 @@ let tesseractWorker = null;
 let cameraStream = null;
 let ultimoResultado = null;
 let historialIncidencias = [];
+let lastIncidencePDFBlob = null;
 
 // ==================== UTILIDADES ====================
 function normalizeForCompare(s) {
@@ -84,9 +85,9 @@ function matchResiduoHeuristic(resTarget, residuoMaster) {
   const tA = tokenizeWordsForMatch(resTarget);
   const tB = tokenizeWordsForMatch(residuoMaster);
   const tokenScore = tokenIntersectionScore(tA, tB);
-  if (tokenScore >= 0.45) return true;
+  if (tokenScore >= 0.35) return true; // menos estricto para capturar variantes
   const sim = similarityNormalized(resTarget, residuoMaster);
-  if (sim >= 0.72) return true;
+  if (sim >= 0.68) return true; // menos estricto
   return false;
 }
 function normForMatching(s) { return normalizeForCompare(s || '').toUpperCase(); }
@@ -103,27 +104,78 @@ function matchCompanyToMaster(candidate) {
   return candidate.trim();
 }
 
-// ==================== TESSERACT ====================
+// ==================== TESSERACT (con preprocesado) ====================
 async function inicializarTesseract() {
   try {
     if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js no encontrado');
     tesseractWorker = await Tesseract.createWorker({ logger: m => {/*optional*/} });
     await tesseractWorker.loadLanguage('spa');
     await tesseractWorker.initialize('spa');
-    try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' }); } catch (e) {}
+    try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' }); } catch (e) {}
     console.log('Tesseract inicializado');
   } catch (e) {
     console.error('Error inicializando Tesseract', e);
     safeMostrarError('No fue posible inicializar OCR (Tesseract).');
   }
 }
+
+// Preprocesado básico de imagen: escala, grises, contraste y umbral ligero
+async function preprocessImageToCanvas(fileOrBlob, maxWidth = 1600) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(fileOrBlob);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxWidth / img.naturalWidth);
+        const w = Math.round(img.naturalWidth * scale);
+        const h = Math.round(img.naturalHeight * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        // dibujar la imagen escalada
+        ctx.drawImage(img, 0, 0, w, h);
+        // obtener pixels y aplicar conversión a grises + ligero aumento de contraste
+        try {
+          const imageData = ctx.getImageData(0, 0, w, h);
+          const data = imageData.data;
+          // parámetros
+          const contrast = 1.1; // 1 = sin cambio, >1 aumenta
+          const threshold = 0;  // >=0 para binarizar leve si es necesario (0 desactiva)
+          // ajuste
+          const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            // luminancia
+            let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            // contraste
+            l = factor * (l - 128) + 128;
+            if (threshold > 0) l = (l > threshold ? 255 : 0);
+            data[i] = data[i+1] = data[i+2] = Math.max(0, Math.min(255, l));
+          }
+          ctx.putImageData(imageData, 0, 0);
+        } catch (e) {
+          // si getImageData falla (CORS), nos quedamos con la imagen escalada sin preprocesado
+          console.warn('Preprocesado de imagen parcial falló:', e);
+        }
+        URL.revokeObjectURL(url);
+        resolve(canvas);
+      } catch (err) { URL.revokeObjectURL(url); reject(err); }
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
 async function ejecutarOCR(imagen) {
   if (!imagen) throw new Error('No hay imagen para OCR');
   if (!tesseractWorker) await inicializarTesseract();
-  return await tesseractWorker.recognize(imagen);
+  // preprocesar y pasar canvas directamente a Tesseract (mejora precisión)
+  const canvas = await preprocessImageToCanvas(imagen);
+  return await tesseractWorker.recognize(canvas);
 }
 
-// ==================== HELPERS IMAGEN/CROP ====================
+// ==================== HELPERS IMAGEN/CROP (utilizan preprocesado antes de OCR) ====================
 function fileToImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -151,7 +203,8 @@ async function ocrCrop(fileOrBlob, rectPercent, psm = '6') {
   const blob = await cropImageToBlob(img, rectPercent, 0.95);
   if (!blob) return '';
   try { await tesseractWorker.setParameters({ tessedit_pageseg_mode: psm }); } catch (e) {}
-  const { data } = await tesseractWorker.recognize(blob);
+  const canvas = await preprocessImageToCanvas(blob);
+  const { data } = await tesseractWorker.recognize(canvas);
   return data && data.text ? data.text.trim() : '';
 }
 const DEFAULT_RECTS = {
@@ -198,7 +251,7 @@ async function extractFieldsByCrop(file) {
   try {
     if (!tesseractWorker) await inicializarTesseract();
     await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' });
-    const resWords = await tesseractWorker.recognize(file);
+    const resWords = await tesseractWorker.recognize(await preprocessImageToCanvas(file));
     const wordsRaw = (resWords && resWords.data && resWords.data.words) ? resWords.data.words : [];
     fullText = (resWords && resWords.data && resWords.data.text) ? resWords.data.text : '';
 
@@ -437,7 +490,7 @@ function verificarContraListaMaestra(razonSocial, descripcionResiduo) {
         resultado.accionesRecomendadas = ['No aceptar ingreso. Revisar clasificaciones.'];
       } else {
         const tP = tokenizeWordsForMatch(p);
-        if (tokenIntersectionScore(descTokens, tP) >= 0.7) {
+        if (tokenIntersectionScore(descTokens, tP) >= 0.6) {
           resultado.esAceptable = false;
           resultado.motivo = `❌ RECHAZADO: Posible término peligroso detectado ("${p}").`;
           resultado.nivelRiesgo = 'alto';
@@ -525,6 +578,12 @@ function mostrarResultadosEnInterfaz(resultado) {
       verificationContent.innerHTML = '<ul>' + resultado.coincidencias.map(c=>`<li>${c.tipo}: ${c.valor} (${c.estado})</li>`).join('') + '</ul>';
     } else verificationContent.innerHTML = '<div>No se encontraron coincidencias.</div>';
   }
+
+  // Mostrar sección de incidencia sólo cuando esté rechazado
+  const incidenceSection = document.getElementById('incidenceSection');
+  const incidenceConfirmation = document.getElementById('incidenceConfirmation');
+  if (incidenceSection) incidenceSection.style.display = resultado.esAceptable ? 'none' : 'block';
+  if (incidenceConfirmation) incidenceConfirmation.style.display = 'none';
 
   console.log('Resultado mostrado en UI:', resultado);
 }
@@ -650,7 +709,109 @@ function reiniciarEscaneo() {
   console.log('reiniciarEscaneo ejecutado');
 }
 
-// ==================== descargarReporteCompleto (asegurar existencia y funcionamiento) ====================
+// ==================== PDF: generar y descargar incidencia ====================
+async function generarPDFIncidencia(incidence) {
+  // Construir un bloque HTML con la info (será renderizado con html2canvas)
+  const container = document.createElement('div');
+  container.className = 'pdf-report-template';
+  container.style.background = '#fff';
+  container.innerHTML = `
+    <div class="pdf-header">
+      <img class="pdf-logo" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='16' width='100' height='100' fill='%23348' /><text x='50' y='58' font-size='48' text-anchor='middle' fill='white' font-family='Arial'>G</text></svg>" />
+      <div>
+        <div class="pdf-title">Reporte de Incidencia - ${incidence.id}</div>
+        <div style="font-size:12px;color:#666;">Generado: ${new Date(incidence.fecha).toLocaleString()}</div>
+      </div>
+    </div>
+    <div class="pdf-section">
+      <div class="pdf-kv"><div class="k">Generador</div><div class="v">${escapeHtml(incidence.generador || '')}</div></div>
+      <div class="pdf-kv"><div class="k">Descripción del Residuo</div><div class="v">${escapeHtml(incidence.descripcion || '')}</div></div>
+      <div class="pdf-kv"><div class="k">Motivo</div><div class="v">${escapeHtml(incidence.motivo || '')}</div></div>
+      <div class="pdf-kv"><div class="k">Observaciones</div><div class="v">${escapeHtml(incidence.observaciones || '')}</div></div>
+      <div class="pdf-kv"><div class="k">Asignado a</div><div class="v">${escapeHtml(incidence.asignado || '')}</div></div>
+    </div>
+    <div class="pdf-section">
+      <div style="font-weight:700;margin-bottom:6px">Texto OCR completo (resumen)</div>
+      <div style="white-space:pre-wrap;font-size:11px;color:#222">${escapeHtml((incidence.textoOCR || '').slice(0, 500))}${(incidence.textoOCR && incidence.textoOCR.length>500? '...':'')}</div>
+    </div>
+  `;
+  document.body.appendChild(container);
+  // renderizar a canvas
+  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
+  document.body.removeChild(container);
+  // crear PDF
+  const { jsPDF } = window.jspdf;
+  // calculamos dimensiones en puntos para jsPDF
+  const imgData = canvas.toDataURL('image/png');
+  const pdf = new jsPDF({
+    unit: 'px',
+    format: [canvas.width, canvas.height]
+  });
+  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+  const blob = pdf.output('blob');
+  return blob;
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]; });
+}
+
+async function descargarIncidenciaPDFBlob(blob, filename = 'incidencia.pdf') {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Registrar incidencia: validaciones, persistir y generar PDF
+async function registrarIncidencia() {
+  if (!ultimoResultado) { safeMostrarError('No hay resultado actual para registrar incidencia.'); return; }
+  const notesEl = document.getElementById('incidenceNotes');
+  const assignedEl = document.getElementById('assignedTo');
+  const notes = notesEl ? notesEl.value.trim() : '';
+  const assignedTo = assignedEl ? assignedEl.value.trim() : '';
+  if (!notes) { safeMostrarError('Es necesario indicar observaciones de la incidencia.'); return; }
+
+  const inc = {
+    id: 'INC-' + Date.now().toString().slice(-8),
+    fecha: new Date().toISOString(),
+    generador: ultimoResultado.razonSocial,
+    descripcion: ultimoResultado.descripcionResiduo,
+    motivo: ultimoResultado.motivo,
+    observaciones: notes,
+    asignado: assignedTo,
+    textoOCR: ultimoResultado.textoOriginal || ultimoResultado.textoOCRCompleto || ''
+  };
+
+  historialIncidencias.push(inc);
+  try { localStorage.setItem('historialIncidencias', JSON.stringify(historialIncidencias)); } catch (e) { console.warn('No se pudo guardar historial', e); }
+
+  // generar PDF y guardar blob para descargas
+  try {
+    const blob = await generarPDFIncidencia(inc);
+    lastIncidencePDFBlob = blob;
+    // actualizar UI de confirmación
+    const incConfirm = document.getElementById('incidenceConfirmation');
+    const confMsg = document.getElementById('confirmationMessage');
+    if (incConfirm) incConfirm.style.display = 'block';
+    if (confMsg) confMsg.innerHTML = `La incidencia <strong>${inc.id}</strong> ha sido registrada en el sistema.`;
+    // habilitar botón de descarga para este PDF
+    const downloadBtn = document.getElementById('downloadIncidenceReport');
+    if (downloadBtn) downloadBtn.onclick = () => descargarIncidenciaPDFBlob(lastIncidencePDFBlob, `reporte_incidencia_${inc.id}.pdf`);
+
+    console.log('Incidencia registrada:', inc);
+  } catch (e) {
+    console.error('Error generando PDF de incidencia', e);
+    safeMostrarError('La incidencia se registró, pero hubo un error generando el PDF.');
+  }
+}
+
+// ==================== descargarReporteCompleto (texto) ====================
 function descargarReporteCompleto() {
   if (!ultimoResultado) { alert('No hay resultado para descargar.'); return; }
   const contenido = generarReporteCompleto(ultimoResultado);
@@ -672,6 +833,10 @@ function setupEventListeners() {
   const processBtn = document.getElementById('processBtn');
   const newScanBtn = document.getElementById('newScanBtn');
   const downloadReportBtn = document.getElementById('downloadReportBtn');
+  const registerIncidenceBtn = document.getElementById('registerIncidenceBtn');
+  const skipIncidenceBtn = document.getElementById('skipIncidenceBtn');
+  const newScanAfterIncidence = document.getElementById('newScanAfterIncidence');
+  const downloadIncidenceReportBtn = document.getElementById('downloadIncidenceReport');
 
   if (cameraBtn) cameraBtn.addEventListener('click', openCamera);
   if (uploadBtn) uploadBtn.addEventListener('click', () => fileInput && fileInput.click());
@@ -680,6 +845,18 @@ function setupEventListeners() {
   if (cancelCameraBtn) cancelCameraBtn.addEventListener('click', closeCamera);
   if (processBtn) processBtn.addEventListener('click', iniciarAnalisis);
   if (newScanBtn) newScanBtn.addEventListener('click', reiniciarEscaneo);
+
+  if (registerIncidenceBtn) registerIncidenceBtn.addEventListener('click', () => registrarIncidencia());
+  if (skipIncidenceBtn) skipIncidenceBtn.addEventListener('click', () => {
+    const incSection = document.getElementById('incidenceSection');
+    if (incSection) incSection.style.display = 'none';
+  });
+
+  if (newScanAfterIncidence) newScanAfterIncidence.addEventListener('click', () => reiniciarEscaneo());
+  if (downloadIncidenceReportBtn) downloadIncidenceReportBtn.addEventListener('click', () => {
+    if (lastIncidencePDFBlob) descargarIncidenciaPDFBlob(lastIncidencePDFBlob, `reporte_incidencia.pdf`);
+    else safeMostrarError('No hay PDF de incidencia disponible.');
+  });
 
   // asegurarse de enlazar el botón descargar (por si no existía en el markup en el momento anterior)
   if (downloadReportBtn) downloadReportBtn.addEventListener('click', descargarReporteCompleto);
@@ -700,4 +877,4 @@ window.addEventListener('beforeunload', () => {
   if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
 });
 
-console.log('Script cargado: listo para validar manifiestos');    
+console.log('Script cargado: listo para validar manifiestos');
