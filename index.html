@@ -9,12 +9,47 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+    <style>
+      /* Pequeños ajustes para mostrar el icono de la aplicación */
+      #topAppIcon {
+        width:44px;
+        height:44px;
+        border-radius:8px;
+        margin-right:10px;
+        vertical-align:middle;
+      }
+      header {
+        display:flex;
+        align-items:center;
+        gap:12px;
+      }
+      /* Report template (hidden) */
+      .pdf-report-template {
+        font-family: Arial, Helvetica, sans-serif;
+        padding:20px;
+        color:#111;
+        width:800px;
+        background:#fff;
+      }
+      .pdf-header { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+      .pdf-logo { width:64px; height:64px; border-radius:8px; }
+      .pdf-title { font-size:20px; font-weight:700; }
+      .pdf-section { margin-top:10px; }
+      .pdf-kv { display:flex; gap:8px; margin:4px 0; }
+      .pdf-kv .k { width:180px; font-weight:700; color:#333; }
+      .pdf-kv .v { color:#222; }
+    </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1><i class="bi bi-file-earmark-medical"></i> Validación Automatica</h1>
-            <p class="subtitle">Escanea manifiestos y detecta automáticamente si son aceptables según perfiles CRM</p>
+            <!-- ICONO EN LA PARTE SUPERIOR: reemplaza src por tu logo si deseas -->
+            <img id="topAppIcon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='16' width='100' height='100' fill='%23348' /><text x='50' y='58' font-size='48' text-anchor='middle' fill='white' font-family='Arial'>G</text></svg>" alt="App">
+            <div>
+              <h1 style="margin:0;"><i class="bi bi-file-earmark-medical"></i> Validación Automática</h1>
+              <p class="subtitle" style="margin:0.2rem 0 0 0;">Escanea manifiestos y detecta automáticamente si son aceptables según perfiles CRM</p>
+            </div>
         </header>
 
         <!-- PASO 1: CAPTURAR DOCUMENTO -->
@@ -185,8 +220,12 @@
         </footer>
     </div>
 
-    <!-- Tesseract.js para OCR -->
+    <!-- Librerías necesarias -->
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@v4.0.2/dist/tesseract.min.js'></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+    <!-- Nuestro script mejorado -->
     <script src="script.js"></script>
 </body>
 </html>
