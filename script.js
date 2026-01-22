@@ -247,20 +247,189 @@ function looksLikeAddressOrManifest(s) {
 
 // ==================== EXTRACCIÓN (mejorada para campo 4 y 5) ====================
 async function extractFieldsByCrop(file) {
-  // ... (mantener tu implementación original aquí) ...
-  // Para acortar en este bloque de ejemplo, asumimos que aquí está el mismo código
-  // que tenías antes para extraer razonSocial, descripcionResiduo y textoOCRCompleto.
-  // Mantén la función completa de tu versión anterior (la que ya estaba en tu script).
-  return await (async function(){ 
-    // invocamos el mismo flujo de extracción que ya tenías (no repetir todo para claridad).
-    // En tu integración final pega aquí el contenido de tu función extractFieldsByCrop original.
-    // Para que el ejemplo funcione copia/pega tu implementación completa.
-    return { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', textoOCRCompleto: '' };
-  })();
+  let razon = '', descripcion = '', fullText = '';
+  try {
+    if (!tesseractWorker) await inicializarTesseract();
+    await tesseractWorker.setParameters({ tessedit_pageseg_mode: '6' });
+    const resWords = await tesseractWorker.recognize(await preprocessImageToCanvas(file));
+    const wordsRaw = (resWords && resWords.data && resWords.data.words) ? resWords.data.words : [];
+    fullText = (resWords && resWords.data && resWords.data.text) ? resWords.data.text : '';
+
+    const words = wordsRaw.map(w => {
+      let x0=0,y0=0,x1=0,y1=0;
+      if (w.bbox && typeof w.bbox === 'object') {
+        x0 = w.bbox.x0 || w.bbox.x || w.bbox.left || 0;
+        y0 = w.bbox.y0 || w.bbox.y || w.bbox.top || 0;
+        x1 = w.bbox.x1 || (w.bbox.x || 0);
+        y1 = w.bbox.y1 || (w.bbox.y || 0);
+      } else {
+        x0 = w.x0 || w.left || 0;
+        y0 = w.y0 || w.top || 0;
+        x1 = w.x1 || (w.left ? w.left + (w.width || 0) : x0 + (w.width || 0));
+        y1 = w.y1 || (w.top ? w.top + (w.height || 0) : y0 + (w.height || 0));
+      }
+      if (x1 < x0) { const t=x0; x0=x1; x1=t; }
+      if (y1 < y0) { const t=y0; y0=y1; y1=t; }
+      const text = (w.text || w.word || '').toString().trim();
+      return { text, x0, y0, x1, y1, cx:(x0+x1)/2, cy:(y0+y1)/2, w:Math.max(1,x1-x0), h:Math.max(1,y1-y0) };
+    }).filter(w => w.text && w.text.length>0);
+
+    const rows = groupWordsIntoRows(words);
+    console.log('DEBUG rowsPreview:', rows.slice(0,20).map(r => r.words.map(w=>w.text).join(' | ')));
+
+    // --- RAZÓN SOCIAL (campo 4) ---
+    let companyFound = '';
+    const fullUpper = (fullText || '').replace(/\r/g,'\n');
+
+    let m = fullUpper.match(/4\W{0,3}[-\.\)]?\s*RAZON\s+SOCIAL(?:\s+DE\s+LA\s+EMPRESA)?[^\n\r]*[:\-\s]{1,}\s*([^\n\r]+)/i);
+    if (m && m[1] && m[1].trim().length>2 && !looksLikeAddressOrManifest(m[1])) {
+      companyFound = m[1].trim();
+    } else {
+      const lines = fullUpper.split('\n');
+      for (let i=0;i<lines.length;i++) {
+        if (/RAZON\s+SOCIAL/i.test(lines[i])) {
+          const after = lines[i].replace(/RAZON\s+SOCIAL(?:\s+DE\s+LA\s+EMPRESA)?/i,'').replace(/^[\:\-\.\s]+/,'').trim();
+          if (after && !looksLikeAddressOrManifest(after) && after.length>2) { companyFound = after; break; }
+          for (let j=i+1;j<=Math.min(i+3,lines.length-1);j++) {
+            const cand = lines[j].trim();
+            if (!cand) continue;
+            if (!looksLikeAddressOrManifest(cand)) { companyFound = cand; break; }
+          }
+          if (companyFound) break;
+        }
+      }
+      if (!companyFound) {
+        const normFull = normalizeForCompare(fullUpper);
+        for (const item of LISTA_MAESTRA) {
+          const genNorm = normalizeForCompare(item.generador || '');
+          if (genNorm && normFull.includes(genNorm)) {
+            companyFound = item.generador;
+            break;
+          }
+        }
+      }
+      if (!companyFound) {
+        let razonRowIdx = -1, razonWordIdx = -1;
+        for (let i=0;i<rows.length;i++) {
+          for (let j=0;j<rows[i].words.length;j++) {
+            const t = rows[i].words[j].text.replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g,' ').toUpperCase();
+            if (/\bRAZON\b/.test(t) || /\bRAZÓN\b/.test(t) || /RAZON\s+SOCIAL/.test(t)) { razonRowIdx=i; razonWordIdx=j; break; }
+          }
+          if (razonRowIdx>=0) break;
+        }
+        if (razonRowIdx>=0) {
+          const row = rows[razonRowIdx];
+          let startIdx = razonWordIdx;
+          for (let k = razonWordIdx; k<row.words.length; k++) {
+            const tt = row.words[k].text.replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g,' ').toUpperCase();
+            if (/\bSOCIAL\b/.test(tt)) { startIdx = k; break; }
+          }
+          const labelRight = row.words[startIdx].x1;
+          const rightWords = row.words.filter(w => w.cx > labelRight - 2);
+          const candidate = rightWords.map(w=>w.text).join(' ').trim();
+          if (candidate && !looksLikeAddressOrManifest(candidate)) companyFound = candidate;
+        }
+      }
+    }
+
+    if (companyFound && looksLikeAddressOrManifest(companyFound)) {
+      const parts = fullUpper.split('\n');
+      const idx = parts.findIndex(p => /RAZON\s+SOCIAL/i.test(p));
+      if (idx >= 0 && parts[idx+1] && !looksLikeAddressOrManifest(parts[idx+1])) {
+        companyFound = parts[idx+1].trim();
+      }
+    }
+
+    const cleanCompany = (companyFound || '').replace(/\s{2,}/g,' ').replace(/^[\-\:\.]+/,'').trim();
+    const finalCompany = matchCompanyToMaster(cleanCompany) || cleanCompany || 'Desconocido';
+
+    // --- DESCRIPCIÓN (campo 5) : tomar SOLO LA LÍNEA PRINCIPAL ---
+    let descFound = '';
+    let mm = fullUpper.match(/5\W{0,3}[-\.\)]?\s*DESCRIPCION[^\n\r]*[:\-\s]{0,}\s*([^\n\r]*)/i);
+    if (mm && mm[1] && mm[1].trim().length>3) {
+      const parts = fullUpper.split('\n');
+      const idx = parts.findIndex(p => /DESCRIPCION/i.test(p));
+      if (idx >= 0 && parts[idx+1]) descFound = parts[idx+1].trim();
+      else descFound = mm[1].trim();
+    } else {
+      let descrRowIdx = -1;
+      for (let i=0;i<rows.length;i++){
+        for (let j=0;j<rows[i].words.length;j++){
+          const t = rows[i].words[j].text.replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g,' ').toUpperCase();
+          if (/\bDESCRIPCION\b/.test(t) || /\bDESCRIPCIÓN\b/.test(t) || /^\s*5\s*$/.test(t)) { descrRowIdx = i; break; }
+        }
+        if (descrRowIdx>=0) break;
+      }
+      if (descrRowIdx>=0) {
+        const stopHeaders = ['CONTENEDOR','CAPACIDAD','TIPO','CANTIDAD','UNIDAD','VOLUMEN','PESO','CAPACIDADDE'];
+        let candidateIdx = descrRowIdx + 1;
+        while (candidateIdx < rows.length) {
+          const lineText = rows[candidateIdx].words.map(w=>w.text).join(' ').trim();
+          const norm = lineText.replace(/[^\wÁÉÍÓÚÑáéíóúñ]/g,' ').toUpperCase();
+          if (stopHeaders.some(h => norm.includes(h))) { candidateIdx++; continue; }
+          if (/^[\d\W]+$/.test(lineText)) { candidateIdx++; continue; }
+          if (/RAZON\s+SOCIAL|MANIFIESTO|REGISTRO AMBIENTAL|NO\.\s*DE\s*MANIFIESTO/i.test(lineText)) { candidateIdx++; continue; }
+          // Use ONLY the first valid line (principal name)
+          descFound = lineText;
+          break;
+        }
+      }
+    }
+
+    // If desc is multi-line captured earlier, ensure we only keep the first logical line
+    if (descFound) {
+      // split on common separators (pipes, long dashes, table columns) and take first fragment
+      let frag = descFound.split(/[\|\–\—\-]{2,}|\||\t/)[0].trim();
+      // also split on multiple spaces preceded/followed by numbers/units
+      frag = frag.split(/CAPACIDAD|CONTENEDOR|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
+      // remove leading numeric measures like "600KGS", "15.0M3/1 1,400" etc. Keep only textual name portion
+      frag = frag.replace(/(^[\d\.,\s]*[KkGgSsLlmM3\/\s\(\)]{0,})/,'').trim();
+      // final cleanup: remove odd characters and excessive spaces
+      frag = frag.replace(/[_\[\]\{\}]+/g,' ').replace(/\s{2,}/g,' ').trim();
+      descFound = frag;
+    }
+
+    // Fallback crop if still empty
+    if (!descFound || descFound.length < 3) {
+      try {
+        const descrCrop = await ocrCrop(file, DEFAULT_RECTS.descrRect, '6');
+        if (descrCrop && descrCrop.trim().length>2) {
+          descFound = descrCrop.replace(/DESCRIPCION.*?:?/i,'').split(/\n/).map(l=>l.trim()).filter(Boolean)[0] || descrCrop.trim();
+          // same cleanup
+          descFound = descFound.split(/[\|\–\—\-]{2,}|\||\t/)[0].trim();
+          descFound = descFound.split(/CAPACIDAD|CONTENEDOR|TIPO|CANTIDAD|UNIDAD|VOLUMEN|PESO/i)[0].trim();
+          descFound = descFound.replace(/^\s*[\d\.,]+\s*(KGS|KG|LTS|M3|M³)?\b/i,'').trim();
+        }
+      } catch (e) { console.warn('fallback descrCrop fail', e); }
+    }
+
+    const finalDesc = (descFound && descFound.length>0) ? descFound : 'Desconocido';
+
+    console.log('DEBUG extracted raw company:', companyFound);
+    console.log('DEBUG finalCompany (after mapping):', finalCompany);
+    console.log('DEBUG extracted raw desc:', descFound);
+    console.log('DEBUG finalDesc:', finalDesc);
+
+    return { razonSocial: finalCompany || 'Desconocido', descripcionResiduo: finalDesc || 'Desconocido', textoOCRCompleto: fullText || '' };
+
+  } catch (err) {
+    console.warn('extractFieldsByCrop error, fallback to full OCR', err);
+    try {
+      if (!tesseractWorker) await inicializarTesseract();
+      const fullRes = await ejecutarOCR(file);
+      const fullText = (fullRes && fullRes.data && fullRes.data.text) ? fullRes.data.text : '';
+      const { razonSocial, descripcionResiduo } = extractFieldsFromFullText(fullText);
+      const finalCompany = matchCompanyToMaster(razonSocial) || razonSocial || 'Desconocido';
+      const finalDesc = descripcionResiduo || 'Desconocido';
+      return { razonSocial: finalCompany, descripcionResiduo: finalDesc, textoOCRCompleto: fullText };
+    } catch (e2) {
+      console.error('Fallback OCR also failed', e2);
+      return { razonSocial: 'Desconocido', descripcionResiduo: 'Desconocido', textoOCRCompleto: '' };
+    }
+  }
 }
 
 function extractFieldsFromFullText(fullText) {
-  // mantiene tu función original (idéntica a la anterior)
   const salida = { razonSocial: '', descripcionResiduo: '' };
   if (!fullText) return salida;
   const lines = fullText.replace(/\r/g,'\n').split('\n').map(l => l.trim()).filter(Boolean);
@@ -540,70 +709,15 @@ function reiniciarEscaneo() {
   console.log('reiniciarEscaneo ejecutado');
 }
 
-// ==================== PDF HELPERS ====================
-function sanitizeOcrTextForPdf(text, maxChars = 2000) {
-  if (!text) return '';
-  // eliminar caracteres de control, reducir secuencias de símbolos extraños y múltiples espacios
-  let s = text.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ');
-  // reemplazar secuencias largas de caracteres no imprimibles/puntuación por un solo espacio
-  s = s.replace(/[^\wÁÉÍÓÚÑáéíóúñ0-9\.,;:\-\(\)\/\s]{2,}/g, ' ');
-  s = s.replace(/\s{2,}/g, ' ').trim();
-  if (s.length > maxChars) s = s.slice(0, maxChars) + '...';
-  return s;
-}
-
-function waitForImagesLoaded(container) {
-  const imgs = Array.from(container.querySelectorAll('img'));
-  const toLoad = imgs.filter(i => !i.complete);
-  if (!toLoad.length) return Promise.resolve();
-  return Promise.all(toLoad.map(img => new Promise(res => {
-    img.onload = img.onerror = () => res();
-  })));
-}
-
-// Convierte canvas grande a PDF multipágina y lo descarga
-async function canvasToMultiPagePDF(canvas, filename = 'documento.pdf') {
-  const { jsPDF } = window.jspdf;
-  // Crear PDF A4 en puntos (pt)
-  const pdf = new jsPDF('p', 'pt', 'a4');
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-
-  const imgData = canvas.toDataURL('image/png');
-  // calcular tamaño de la imagen para ajustar al ancho de la página
-  const imgProps = { width: canvas.width, height: canvas.height };
-  const imgWidth = pageWidth;
-  const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
-
-  let position = 0;
-  pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-  let heightLeft = imgHeight - pageHeight;
-
-  while (heightLeft > -1) {
-    position = position - pageHeight;
-    if (heightLeft <= 0) break;
-    pdf.addPage();
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
-
-  // retornar blob
-  const blob = pdf.output('blob');
-  return blob;
-}
-
 // ==================== PDF: generar y descargar incidencia ====================
-async function generarPDFIncidencia(incidence, options = { includeOCR: false }) {
+async function generarPDFIncidencia(incidence) {
   // Construir un bloque HTML con la info (será renderizado con html2canvas)
   const container = document.createElement('div');
   container.className = 'pdf-report-template';
   container.style.background = '#fff';
-  const logoSrc = getSavedAppLogoDataUrl() || `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='16' width='100' height='100' fill='%23348' /><text x='50' y='58' font-size='48' text-anchor='middle' fill='white' font-family='Arial'>G</text></svg>`;
-  const sanitizedOcr = sanitizeOcrTextForPdf(incidence.textoOCR || '', 1500);
-
   container.innerHTML = `
     <div class="pdf-header">
-      <img class="pdf-logo" src="${logoSrc}" />
+      <img class="pdf-logo" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='16' width='100' height='100' fill='%23348' /><text x='50' y='58' font-size='48' text-anchor='middle' fill='white' font-family='Arial'>G</text></svg>" />
       <div>
         <div class="pdf-title">Reporte de Incidencia - ${incidence.id}</div>
         <div style="font-size:12px;color:#666;">Generado: ${new Date(incidence.fecha).toLocaleString()}</div>
@@ -616,31 +730,26 @@ async function generarPDFIncidencia(incidence, options = { includeOCR: false }) 
       <div class="pdf-kv"><div class="k">Observaciones</div><div class="v">${escapeHtml(incidence.observaciones || '')}</div></div>
       <div class="pdf-kv"><div class="k">Asignado a</div><div class="v">${escapeHtml(incidence.asignado || '')}</div></div>
     </div>
-    ${options.includeOCR ? `
-      <div class="pdf-section">
-        <div style="font-weight:700;margin-bottom:6px">Texto OCR completo (resumen)</div>
-        <div style="white-space:pre-wrap;font-size:11px;color:#222">${escapeHtml(sanitizedOcr)}</div>
-      </div>
-    ` : ''}
+    <div class="pdf-section">
+      <div style="font-weight:700;margin-bottom:6px">Texto OCR completo (resumen)</div>
+      <div style="white-space:pre-wrap;font-size:11px;color:#222">${escapeHtml((incidence.textoOCR || '').slice(0, 500))}${(incidence.textoOCR && incidence.textoOCR.length>500? '...':'')}</div>
+    </div>
   `;
-
-  // agregar temporalmente al DOM para que html2canvas pueda renderizar estilos y fonts
-  container.style.position = 'fixed';
-  container.style.left = '-9999px';
   document.body.appendChild(container);
-
-  try {
-    // esperar a que las imagenes (logo) carguen
-    await waitForImagesLoaded(container);
-
-    // renderizar a canvas con opciones que reducen cortes
-    const canvas = await html2canvas(container, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff' });
-    const blob = await canvasToMultiPagePDF(canvas, `reporte_incidencia_${incidence.id}.pdf`);
-
-    return blob;
-  } finally {
-    document.body.removeChild(container);
-  }
+  // renderizar a canvas
+  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
+  document.body.removeChild(container);
+  // crear PDF
+  const { jsPDF } = window.jspdf;
+  // calculamos dimensiones en puntos para jsPDF
+  const imgData = canvas.toDataURL('image/png');
+  const pdf = new jsPDF({
+    unit: 'px',
+    format: [canvas.width, canvas.height]
+  });
+  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+  const blob = pdf.output('blob');
+  return blob;
 }
 
 function escapeHtml(s) {
@@ -664,10 +773,8 @@ async function registrarIncidencia() {
   if (!ultimoResultado) { safeMostrarError('No hay resultado actual para registrar incidencia.'); return; }
   const notesEl = document.getElementById('incidenceNotes');
   const assignedEl = document.getElementById('assignedTo');
-  const includeOcrEl = document.getElementById('includeOcrCheckbox');
   const notes = notesEl ? notesEl.value.trim() : '';
   const assignedTo = assignedEl ? assignedEl.value.trim() : '';
-  const includeOcr = includeOcrEl ? includeOcrEl.checked : false;
   if (!notes) { safeMostrarError('Es necesario indicar observaciones de la incidencia.'); return; }
 
   const inc = {
@@ -686,7 +793,7 @@ async function registrarIncidencia() {
 
   // generar PDF y guardar blob para descargas
   try {
-    const blob = await generarPDFIncidencia(inc, { includeOCR: includeOcr });
+    const blob = await generarPDFIncidencia(inc);
     lastIncidencePDFBlob = blob;
     // actualizar UI de confirmación
     const incConfirm = document.getElementById('incidenceConfirmation');
@@ -714,21 +821,6 @@ function descargarReporteCompleto() {
 }
 function generarReporteCompleto(resultado) {
   return `REPORTE ANALISIS\nID: ${resultado.idAnalisis}\nGenerador: ${resultado.razonSocial}\nResiduo: ${resultado.descripcionResiduo}\nMotivo: ${resultado.motivo}\nTexto OCR:\n${resultado.textoOCRCompleto || resultado.textoOriginal || ''}\n`;
-}
-
-// ==================== LOGO APP (guardar en localStorage) ====================
-function setAppLogoFromFile(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const dataUrl = reader.result;
-    document.getElementById('topAppIcon').src = dataUrl;
-    try { localStorage.setItem('appLogoDataUrl', dataUrl); } catch (e) { console.warn('No se pudo guardar logo en localStorage', e); }
-  };
-  reader.readAsDataURL(file);
-}
-function getSavedAppLogoDataUrl() {
-  try { return localStorage.getItem('appLogoDataUrl'); } catch (e) { return null; }
 }
 
 // ==================== EVENTOS E INICIALIZACIÓN ====================
@@ -768,25 +860,13 @@ function setupEventListeners() {
 
   // asegurarse de enlazar el botón descargar (por si no existía en el markup en el momento anterior)
   if (downloadReportBtn) downloadReportBtn.addEventListener('click', descargarReporteCompleto);
-
-  // logo input
-  const appLogoInput = document.getElementById('appLogoInput');
-  if (appLogoInput) {
-    appLogoInput.addEventListener('change', (e) => {
-      const f = e.target.files && e.target.files[0];
-      if (f) setAppLogoFromFile(f);
-    });
-  }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
-  // cargar logo guardado si lo hay
-  const savedLogo = getSavedAppLogoDataUrl();
-  if (savedLogo) {
-    const img = document.getElementById('topAppIcon');
-    if (img) img.src = savedLogo;
-  }
+  // vínculo adicional por si el botón se añadió dinámicamente después del setup (refuerzo)
+  const downloadReportBtnLate = document.getElementById('downloadReportBtn');
+  if (downloadReportBtnLate) downloadReportBtnLate.addEventListener('click', descargarReporteCompleto);
 
   try { await inicializarTesseract(); } catch (e) { console.warn('Tesseract init error', e); }
   try { const saved = localStorage.getItem('historialIncidencias'); if (saved) historialIncidencias = JSON.parse(saved); } catch (e) { console.warn('No se pudo cargar historial', e); }
